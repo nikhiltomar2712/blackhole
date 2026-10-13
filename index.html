@@ -7,118 +7,77 @@
 <title>Gargantua — Black Hole</title>
 <style>
   :root { color-scheme: dark; }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  html, body {
-    height: 100%;
-    background: #000;
-    overflow: hidden;
-  }
-
+  html, body { height: 100%; background: #000; overflow: hidden; }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
                  Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-
   #stage { position: fixed; inset: 0; }
-
   #scene {
-    display: block;
-    width: 100%;
-    height: 100%;
-    touch-action: none;
-    cursor: grab;
-    outline: none;
+    display: block; width: 100%; height: 100%;
+    touch-action: none; cursor: grab; outline: none;
   }
   #scene:active { cursor: grabbing; }
 
-  /* ---------- HUD ---------- */
   .hud {
     position: fixed;
     left: clamp(18px, 4vw, 52px);
     top: clamp(18px, 5vh, 44px);
-    pointer-events: none;
-    user-select: none;
-    z-index: 5;
+    pointer-events: none; user-select: none; z-index: 5;
   }
   .hud .title {
     font-size: clamp(11px, 1.3vw, 14px);
-    font-weight: 600;
-    letter-spacing: 0.42em;
-    text-transform: uppercase;
-    color: rgba(255, 236, 216, 0.92);
-    text-shadow: 0 0 24px rgba(255, 150, 60, 0.35);
+    font-weight: 600; letter-spacing: 0.42em; text-transform: uppercase;
+    color: rgba(255, 240, 220, 0.92);
+    text-shadow: 0 0 26px rgba(255, 160, 70, 0.35);
   }
   .hud .sub {
     margin-top: 10px;
     font-size: clamp(9px, 0.85vw, 10px);
-    letter-spacing: 0.3em;
-    text-transform: uppercase;
-    color: rgba(255, 170, 110, 0.42);
+    letter-spacing: 0.3em; text-transform: uppercase;
+    color: rgba(255, 180, 120, 0.48);
   }
 
   .hint {
-    position: fixed;
-    left: 50%;
-    bottom: clamp(18px, 4.5vh, 40px);
+    position: fixed; left: 50%; bottom: clamp(18px, 4.5vh, 40px);
     transform: translateX(-50%);
-    font-size: 10px;
-    letter-spacing: 0.26em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.3);
-    pointer-events: none;
-    user-select: none;
-    white-space: nowrap;
-    z-index: 5;
+    font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.30);
+    pointer-events: none; user-select: none; white-space: nowrap; z-index: 5;
     animation: hintPulse 5s ease-in-out infinite;
   }
   @keyframes hintPulse {
-    0%, 100% { opacity: 0.35; }
-    50%      { opacity: 0.85; }
+    0%, 100% { opacity: 0.32; }
+    50%      { opacity: 0.82; }
   }
 
   .vignette {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 3;
+    position: fixed; inset: 0; pointer-events: none; z-index: 3;
     background: radial-gradient(
       ellipse at 50% 50%,
-      rgba(0,0,0,0) 42%,
-      rgba(0,0,0,0.35) 78%,
-      rgba(0,0,0,0.72) 100%
+      rgba(0,0,0,0) 40%,
+      rgba(0,0,0,0.35) 76%,
+      rgba(0,0,0,0.82) 100%
     );
   }
 
-  /* ---------- Loader ---------- */
   #loader {
-    position: fixed;
-    inset: 0;
-    z-index: 10;
-    display: grid;
-    place-items: center;
-    background: #000;
-    color: rgba(255, 195, 140, 0.55);
-    font-size: 10px;
-    letter-spacing: 0.34em;
-    text-transform: uppercase;
+    position: fixed; inset: 0; z-index: 10;
+    display: grid; place-items: center;
+    background: #000; color: rgba(255, 200, 150, 0.55);
+    font-size: 10px; letter-spacing: 0.34em; text-transform: uppercase;
     transition: opacity 0.9s ease;
   }
   #loader.hidden { opacity: 0; pointer-events: none; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .hint { animation: none; }
-  }
+  @media (prefers-reduced-motion: reduce) { .hint { animation: none; } }
 </style>
 </head>
 <body>
 
-  <div id="stage">
-    <canvas id="scene"></canvas>
-  </div>
+  <div id="stage"><canvas id="scene"></canvas></div>
 
   <div class="hud">
     <div class="title">Gargantua</div>
@@ -147,7 +106,7 @@
   import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
 
   /* ============================================================
-     1.  SHADERS
+     SHADERS
      ============================================================ */
 
   const VERTEX_SHADER = /* glsl */`
@@ -159,35 +118,32 @@
   `;
 
   const FRAGMENT_SHADER = /* glsl */`
+    precision highp float;
+
     uniform vec2  uResolution;
     uniform float uTime;
     uniform vec3  uCamPos;
-    uniform mat3  uCamBasis;     // columns: right, up, forward
+    uniform mat3  uCamBasis;
     uniform float uTanHalfFov;
 
-    #define STEPS      150
-    #define ESCAPE_R   70.0
-    #define DISK_IN    2.40
-    #define DISK_OUT   10.0
-    #define PHOTON_R   1.50    // photon sphere radius (1.5 rs)
+    #define STEPS        260
+    #define ESCAPE_R     90.0
+    #define HORIZON_R    1.0
+    #define PHOTON_R     1.5
+    #define DISK_IN      2.25
+    #define DISK_OUT     13.0
 
-    /* ---------- hash / noise ---------- */
-
-    float hash21(vec2 p) {
-      p = fract(p * vec2(123.34, 456.21));
-      p += dot(p, p + 45.32);
-      return fract(p.x * p.y);
+    /* ---------- noise ---------- */
+    vec3 hash33(vec3 p) {
+      p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+      p += dot(p, p.yxz + 33.33);
+      return fract((p.xxy + p.yxx) * p.zyx);
     }
-
-    float hash31(vec3 p) {
-      p = fract(p * 0.1031);
-      p += dot(p, p.yzx + 33.33);
-      return fract((p.x + p.y) * p.z);
-    }
+    float hash31(vec3 p) { return hash33(p).x; }
+    float hash21(vec2 p) { return hash33(vec3(p, 0.0)).x; }
 
     float noise2(vec2 x) {
-      vec2 i = floor(x);
-      vec2 f = fract(x);
+      vec2 i = floor(x), f = fract(x);
       f = f * f * (3.0 - 2.0 * f);
       float a = hash21(i);
       float b = hash21(i + vec2(1.0, 0.0));
@@ -195,107 +151,110 @@
       float d = hash21(i + vec2(1.0, 1.0));
       return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
     }
-
     float fbm2(vec2 p) {
-      float s = 0.0;
-      float a = 0.5;
-      mat2 rot = mat2(0.80, 0.60, -0.60, 0.80) * 1.80;
-      for (int i = 0; i < 4; i++) {
-        s += a * noise2(p);
-        p = rot * p;
-        a *= 0.5;
-      }
+      float s = 0.0, a = 0.5;
+      mat2 rot = mat2(0.80, 0.60, -0.60, 0.80) * 1.85;
+      for (int i = 0; i < 5; i++) { s += a * noise2(p); p = rot * p; a *= 0.5; }
       return s;
     }
+    float fbm2a(vec2 p) {
+      float s = 0.0, a = 0.55, norm = 0.0;
+      mat2 rot = mat2(0.80, 0.60, -0.60, 0.80) * 2.05;
+      for (int i = 0; i < 5; i++) { s += a * noise2(p); norm += a; p = rot * p; a *= 0.55; }
+      return s / norm;
+    }
 
-    /* ---------- star field ---------- */
-
-    vec3 starLayer(vec3 dir, float scale, float thr, float sz, float bright) {
+    /* ---------- stars ---------- */
+    vec3 starLayer(vec3 dir, float scale, float thr, float sz, float bright, vec3 tint) {
       vec3 p  = dir * scale;
       vec3 id = floor(p);
       vec3 f  = fract(p) - 0.5;
-
       float h = hash31(id);
       if (h < thr) return vec3(0.0);
-
-      vec3 off = vec3(hash31(id + 11.7),
-                      hash31(id + 27.3),
-                      hash31(id + 51.1)) - 0.5;
-      off *= 0.70;
-
+      vec3 off = vec3(hash31(id + 11.7), hash31(id + 27.3), hash31(id + 51.1)) - 0.5;
+      off *= 0.72;
       float d = length(f - off);
       float s = smoothstep(sz, 0.0, d);
       s *= s;
-
-      float tw = 0.72 + 0.28 * sin(uTime * 1.7 + h * 87.0);
-      return vec3(s * bright * tw);
+      float tw = 0.78 + 0.22 * sin(uTime * 1.9 + h * 91.0);
+      return tint * (s * bright * tw);
     }
-
     vec3 starfield(vec3 dir) {
       vec3 c = vec3(0.0);
-      c += starLayer(dir,  85.0, 0.940, 0.085, 1.00) * vec3(1.00, 0.96, 0.92);
-      c += starLayer(dir, 150.0, 0.955, 0.070, 0.62) * vec3(0.78, 0.86, 1.00);
-      c += starLayer(dir, 260.0, 0.965, 0.055, 0.34) * vec3(1.00, 0.86, 0.70);
+      c += starLayer(dir,  70.0, 0.935, 0.090, 1.15, vec3(1.00, 0.98, 0.95));
+      c += starLayer(dir, 140.0, 0.950, 0.075, 0.72, vec3(0.78, 0.88, 1.00));
+      c += starLayer(dir, 220.0, 0.958, 0.065, 0.46, vec3(1.00, 0.82, 0.62));
+      c += starLayer(dir, 380.0, 0.965, 0.050, 0.28, vec3(0.92, 0.94, 1.00));
       return c;
     }
-
     vec3 background(vec3 dir) {
-      float n = fbm2(vec2(dir.x, dir.z) * 2.0 + dir.y * 1.5);
-      vec3 haze = mix(vec3(0.0035, 0.0050, 0.0130),
-                      vec3(0.0200, 0.0110, 0.0300), n);
-      haze *= 0.55 + 0.45 * smoothstep(-0.7, 0.7, dir.y);
+      float n  = fbm2(vec2(dir.x, dir.z) * 2.0 + dir.y * 1.7);
+      float n2 = fbm2(vec2(dir.y, dir.x) * 4.5 - dir.z * 1.3);
+      vec3 haze = mix(vec3(0.0018, 0.0028, 0.0080),
+                      vec3(0.0140, 0.0065, 0.0215), n * 0.7 + n2 * 0.3);
+      haze *= 0.40 + 0.55 * smoothstep(-0.75, 0.75, dir.y);
       return haze + starfield(dir);
     }
 
     /* ---------- accretion disk ---------- */
 
-    vec3 diskSample(vec3 p, vec3 rd, float r) {
-      // --- differential (Keplerian) rotation ---
-      float phi   = atan(p.z, p.x);
-      float omega = 1.70 / (r * sqrt(r));
-      float ang   = phi + uTime * omega;
+    float relativisticBoost(vec3 pos, vec3 rd, float r) {
+      float v = sqrt(0.5 / max(r - 1.0, 0.35));
+      v = min(v, 0.86);
+      vec3 tang = normalize(cross(vec3(0.0, 1.0, 0.0), pos));
+      float beta   = v;
+      float gamma  = 1.0 / sqrt(max(1.0 - beta * beta, 1e-4));
+      float cosAng = dot(tang, -rd);
+      float D      = 1.0 / max(gamma * (1.0 - beta * cosAng), 0.08);
+      float grav = sqrt(max(0.0, 1.0 - HORIZON_R / max(r, 1.001)));
+      float g = D * grav;
+      return pow(max(g, 0.05), 3.2);
+    }
 
+    vec3 diskSample(vec3 p, vec3 rd, float r) {
+      float phi   = atan(p.z, p.x);
+      float omega = 1.60 / (r * sqrt(r));
+      float ang   = phi + uTime * omega;
       vec2 q = vec2(cos(ang), sin(ang)) * r;
 
-      // --- turbulent gas density ---
-      float n = fbm2(q * 0.60);
-      n = n * 0.78 + 0.22 * noise2(q * 3.10 + 7.0);
-      n = pow(clamp(n * 1.45, 0.0, 1.0), 1.45);
+      float n1 = fbm2a(q * 0.42 + vec2(0.0, uTime * 0.10));
+      float n2 = fbm2a(q * 1.15 - vec2(uTime * 0.15, 0.0));
+      float n3 = fbm2a(q * 3.20 + vec2(uTime * 0.22, uTime * 0.08));
+      float n  = n1 * 0.55 + n2 * 0.30 + n3 * 0.15;
 
-      // --- radial envelope ---
-      float rin  = smoothstep(DISK_IN, DISK_IN + 1.15, r);
-      float rout = 1.0 - smoothstep(DISK_OUT * 0.45, DISK_OUT, r);
-      float density = rin * rout * (0.24 + 1.05 * n);
+      float armPhase = ang * 2.0 - log(r) * 5.5 + uTime * 0.35;
+      float arms     = 0.62 + 0.38 * sin(armPhase);
 
-      // --- temperature gradient: white-hot -> amber -> deep red ---
+      float rin  = smoothstep(DISK_IN, DISK_IN + 1.35, r);
+      float rout = 1.0 - smoothstep(DISK_OUT * 0.42, DISK_OUT, r);
+      float ring = 1.0 + 0.55 * exp(-pow((r - 3.4) * 0.75, 2.0));
+
+      float density = rin * rout * ring * arms * (0.28 + 1.25 * n);
+      density = pow(clamp(density, 0.0, 1.6), 1.35);
+
       float t = clamp((r - DISK_IN) / (DISK_OUT - DISK_IN), 0.0, 1.0);
-      vec3 cHot  = vec3(1.00, 0.97, 0.92);
-      vec3 cMid  = vec3(1.00, 0.58, 0.16);
-      vec3 cCool = vec3(0.72, 0.12, 0.02);
-      vec3 col = mix(cHot, cMid,  smoothstep(0.00, 0.28, t));
-      col      = mix(col,  cCool, smoothstep(0.28, 1.00, t));
+      vec3 cCore  = vec3(1.00, 0.99, 0.96);
+      vec3 cHot   = vec3(1.00, 0.86, 0.55);
+      vec3 cMid   = vec3(0.98, 0.50, 0.14);
+      vec3 cCool  = vec3(0.60, 0.09, 0.02);
 
-      // --- relativistic Doppler beaming ---
-      vec3  vel = normalize(cross(p, vec3(0.0, 1.0, 0.0)));
-      float mu  = dot(vel, -rd);
-      float boost = pow(1.0 / (1.0 - 0.42 * clamp(mu, -0.99, 0.99)), 3.0);
-      boost = clamp(boost, 0.30, 5.0);
+      vec3 col = mix(cCore, cHot, smoothstep(0.00, 0.16, t));
+      col      = mix(col,   cMid, smoothstep(0.14, 0.55, t));
+      col      = mix(col,   cCool, smoothstep(0.50, 1.00, t));
 
-      // --- optical path length through the slab ---
-      float path = clamp(0.25 / max(abs(rd.y), 0.16), 0.45, 1.80);
+      float boost = relativisticBoost(p, rd, r);
+      float path  = clamp(0.30 / max(abs(rd.y), 0.14), 0.5, 2.4);
 
-      return col * density * boost * path * 2.0;
+      /* reduced emission scale (was 4.2) */
+      return col * density * boost * path * 2.1;
     }
 
     /* ---------- main ---------- */
-
     void main() {
-      // ---- primary ray ----
       vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution) / uResolution.y;
       vec3 rd = normalize(uCamBasis * vec3(uv * uTanHalfFov, 1.0));
       vec3 ro = uCamPos;
 
-      // ---- conserved angular momentum of the geodesic ----
       vec3  hv = cross(ro, rd);
       float h2 = dot(hv, hv);
       float hm = sqrt(h2);
@@ -304,64 +263,53 @@
       vec3  dir = rd;
       vec3  col = vec3(0.0);
       float trans = 1.0;
-      float minR = 1e9;
+      float minR  = 1e9;
       bool  captured = false;
 
-      // ---- integrate the null geodesic ----
       for (int i = 0; i < STEPS; i++) {
         float r = length(pos);
         minR = min(minR, r);
+        if (r < HORIZON_R) { captured = true; break; }
+        if (r > ESCAPE_R && dot(pos, dir) > 0.0) break;
 
-        if (r < 1.0) { captured = true; break; }               // crossed the horizon
-        if (r > ESCAPE_R && dot(pos, dir) > 0.0) break;        // escaped to infinity
+        float dt = 0.055 * r * r / (hm + 0.6);
+        dt = clamp(dt, 0.010, 3.0);
 
-        // adaptive step: finer near the hole, coarser far away
-        float dt = clamp(0.055 * r * r / (hm + 1.0), 0.012, 4.0);
-
-        // Schwarzschild null-geodesic acceleration (rs = 1)
         float r2 = r * r;
         vec3  acc = -1.5 * h2 * pos / (r2 * r2 * r);
 
         vec3 npos = pos + dir * dt + 0.5 * acc * dt * dt;
         vec3 ndir = dir + acc * dt;
 
-        // ---- analytic equatorial-plane crossing ----
         if (pos.y * npos.y < 0.0) {
           float f  = pos.y / (pos.y - npos.y);
           vec3  hit = mix(pos, npos, f);
           float rr  = length(hit.xz);
-
           if (rr > DISK_IN && rr < DISK_OUT) {
             vec3 e = diskSample(hit, normalize(dir), rr);
             col   += trans * e;
-            trans *= 1.0 - clamp(dot(e, vec3(0.33)) * 0.55, 0.0, 0.75);
+            trans *= 1.0 - clamp(dot(e, vec3(0.30)) * 0.55, 0.0, 0.78);
           }
         }
-
         pos = npos;
         dir = ndir;
-
-        if (trans < 0.02) break;
+        if (trans < 0.015) break;
       }
 
       vec3 outc = col;
+      if (!captured) outc += trans * background(normalize(dir));
 
-      // ---- background sky (lensed) ----
-      if (!captured) {
-        outc += trans * background(normalize(dir));
-      }
-
-      // ---- subtle photon ring at the shadow edge ----
-      float rq   = (minR - PHOTON_R) * 3.2;
+      /* softer photon ring (was 0.28) */
+      float rq   = (minR - PHOTON_R) * 4.2;
       float ring = exp(-rq * rq);
-      outc += vec3(1.0, 0.72, 0.42) * ring * 0.14;
+      outc += vec3(1.00, 0.78, 0.52) * ring * 0.14;
 
       gl_FragColor = vec4(outc, 1.0);
     }
   `;
 
   /* ============================================================
-     2.  RENDERER / SCENE
+     RENDERER
      ============================================================ */
 
   const stage  = document.getElementById('stage');
@@ -369,23 +317,17 @@
   const loader = document.getElementById('loader');
 
   const renderer = new THREE.WebGLRenderer({
-    canvas,
-    antialias: false,
-    alpha: false,
-    stencil: false,
+    canvas, antialias: false, alpha: false, stencil: false,
     powerPreference: 'high-performance'
   });
   renderer.setClearColor(0x000000, 1);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.82;   // <-- reduced from 1.05
 
-  // ---- initial quality guess based on pixel load ----
-  const dprCap = Math.min(window.devicePixelRatio || 1, 1.5);
-  const estPixels = window.innerWidth * window.innerHeight * dprCap * dprCap;
-  let quality = estPixels > 2.2e6 ? 0.72 : 1.0;
+  let quality = 1.0;
 
   /* ============================================================
-     3.  UNIFORMS + MATERIAL
+     UNIFORMS + MATERIAL
      ============================================================ */
 
   const uniforms = {
@@ -393,46 +335,39 @@
     uTime:       { value: 0 },
     uCamPos:     { value: new THREE.Vector3(0, 5, 24) },
     uCamBasis:   { value: new THREE.Matrix3() },
-    uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(45.0) * 0.5) }
+    uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(48.0) * 0.5) }
   };
 
   const rayMaterial = new THREE.ShaderMaterial({
-    uniforms,
-    vertexShader:   VERTEX_SHADER,
-    fragmentShader: FRAGMENT_SHADER,
-    depthTest:  false,
-    depthWrite: false,
-    blending:   THREE.NoBlending
+    uniforms, vertexShader: VERTEX_SHADER, fragmentShader: FRAGMENT_SHADER,
+    depthTest: false, depthWrite: false, blending: THREE.NoBlending
   });
 
   /* ============================================================
-     4.  POST-PROCESSING
+     POST-PROCESSING  (bloom toned down)
      ============================================================ */
 
   const composer = new EffectComposer(renderer);
-
-  const rayPass = new ShaderPass(rayMaterial);
-  composer.addPass(rayPass);
+  composer.addPass(new ShaderPass(rayMaterial));
 
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.78,   // strength
-    0.72,   // radius
-    0.62    // threshold
+    0.42,   // strength  (was 0.92)
+    0.58,   // radius
+    0.72    // threshold (raised so only the hottest core blooms)
   );
   composer.addPass(bloomPass);
-
   composer.addPass(new OutputPass());
 
   /* ============================================================
-     5.  CAMERA ORBIT (custom, smoothed, inertial)
+     CAMERA ORBIT
      ============================================================ */
 
   const orbit = {
-    theta: 0.55,  phi: 1.36,  radius: 26,
-    tTheta: 0.55, tPhi: 1.36, tRadius: 26,
-    minPhi: 0.25, maxPhi: Math.PI - 0.25,
-    minRadius: 9, maxRadius: 62
+    theta: 0.55,  phi: 1.38,  radius: 24,
+    tTheta: 0.55, tPhi: 1.38, tRadius: 24,
+    minPhi: 0.22, maxPhi: Math.PI - 0.22,
+    minRadius: 8.5, maxRadius: 65
   };
 
   const camPos  = new THREE.Vector3();
@@ -443,10 +378,9 @@
   const basis   = new THREE.Matrix3();
 
   function updateCamera(dt, autoOrbit) {
-    if (autoOrbit) orbit.tTheta += dt * 0.052;
+    if (autoOrbit) orbit.tTheta += dt * 0.045;
 
-    // critically-damped-ish easing
-    const k = 1.0 - Math.exp(-dt * 6.5);
+    const k = 1.0 - Math.exp(-dt * 7.0);
     orbit.theta  += (orbit.tTheta  - orbit.theta)  * k;
     orbit.phi    += (orbit.tPhi    - orbit.phi)    * k;
     orbit.radius += (orbit.tRadius - orbit.radius) * k;
@@ -456,21 +390,16 @@
     const st = Math.sin(orbit.theta);
     const ct = Math.cos(orbit.theta);
 
-    camPos.set(
-      orbit.radius * sp * ct,
-      orbit.radius * cp,
-      orbit.radius * sp * st
-    );
+    camPos.set(orbit.radius * sp * ct, orbit.radius * cp, orbit.radius * sp * st);
 
     forward.copy(camPos).multiplyScalar(-1).normalize();
     right.crossVectors(forward, worldUp).normalize();
     up.crossVectors(right, forward).normalize();
 
-    // column-major: right | up | forward
     basis.set(
-      right.x,   up.x,   forward.x,
-      right.y,   up.y,   forward.y,
-      right.z,   up.z,   forward.z
+      right.x, up.x, forward.x,
+      right.y, up.y, forward.y,
+      right.z, up.z, forward.z
     );
 
     uniforms.uCamPos.value.copy(camPos);
@@ -478,44 +407,31 @@
   }
 
   /* ============================================================
-     6.  INPUT
+     INPUT
      ============================================================ */
 
-  let dragging   = false;
-  let activeId   = null;
-  let lastX = 0, lastY = 0;
-  let resumeDelay = 0;   // pause auto-orbit briefly after interaction
-
-  const ROT_SPEED = 0.0055;
+  let dragging = false, activeId = null, lastX = 0, lastY = 0, resumeDelay = 0;
+  const ROT_SPEED = 0.0052;
 
   canvas.addEventListener('pointerdown', (e) => {
     if (activeId !== null) return;
-    activeId = e.pointerId;
-    dragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
+    activeId = e.pointerId; dragging = true;
+    lastX = e.clientX; lastY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
     resumeDelay = 1.6;
   });
-
   canvas.addEventListener('pointermove', (e) => {
     if (!dragging || e.pointerId !== activeId) return;
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
-    lastX = e.clientX;
-    lastY = e.clientY;
-
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
     orbit.tTheta -= dx * ROT_SPEED;
     orbit.tPhi   -= dy * ROT_SPEED;
     orbit.tPhi    = Math.min(orbit.maxPhi, Math.max(orbit.minPhi, orbit.tPhi));
     resumeDelay   = 1.6;
   });
-
   function endDrag(e) {
     if (e.pointerId !== activeId) return;
-    dragging = false;
-    activeId = null;
-    resumeDelay = 1.6;
+    dragging = false; activeId = null; resumeDelay = 1.6;
   }
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
@@ -523,15 +439,13 @@
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const factor = 1 + Math.sign(e.deltaY) * 0.09;
-    orbit.tRadius = Math.min(
-      orbit.maxRadius,
-      Math.max(orbit.minRadius, orbit.tRadius * factor)
-    );
+    orbit.tRadius = Math.min(orbit.maxRadius,
+                    Math.max(orbit.minRadius, orbit.tRadius * factor));
     resumeDelay = 1.6;
   }, { passive: false });
 
   /* ============================================================
-     7.  RESIZE
+     RESIZE
      ============================================================ */
 
   const drawSize = new THREE.Vector2();
@@ -540,10 +454,14 @@
     const w = stage.clientWidth  || window.innerWidth;
     const h = stage.clientHeight || window.innerHeight;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * quality;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2.0);
+    const pixels = w * h * dpr * dpr;
+    const maxPixels = 5.2e6;
+    if (pixels > maxPixels) dpr *= Math.sqrt(maxPixels / pixels);
+    dpr *= quality;
 
     renderer.setPixelRatio(dpr);
-    renderer.setSize(w, h, false);      // CSS size handled by stylesheet
+    renderer.setSize(w, h, false);
 
     renderer.getDrawingBufferSize(drawSize);
     composer.setSize(drawSize.x, drawSize.y);
@@ -554,51 +472,34 @@
   window.addEventListener('resize', resize);
 
   /* ============================================================
-     8.  ADAPTIVE QUALITY
+     ADAPTIVE QUALITY
      ============================================================ */
 
-  let frames = 0;
-  let accum  = 0;
-  let cooldown = 2.0;
+  let frames = 0, accum = 0, cooldown = 2.5;
 
   function updateQuality(dt) {
-    frames++;
-    accum += dt;
-    cooldown -= dt;
-
+    frames++; accum += dt; cooldown -= dt;
     if (accum < 2.0) return;
-
     const fps = frames / accum;
-    frames = 0;
-    accum  = 0;
-
+    frames = 0; accum = 0;
     if (cooldown > 0) return;
-
-    if (fps < 42 && quality > 0.52) {
-      quality = Math.max(0.52, quality - 0.14);
-      resize();
-      cooldown = 2.5;
+    if (fps < 45 && quality > 0.55) {
+      quality = Math.max(0.55, quality - 0.14); resize(); cooldown = 2.6;
     } else if (fps > 58 && quality < 1.0) {
-      quality = Math.min(1.0, quality + 0.08);
-      resize();
-      cooldown = 3.5;
+      quality = Math.min(1.0, quality + 0.07); resize(); cooldown = 3.5;
     }
   }
 
   /* ============================================================
-     9.  MAIN LOOP
+     LOOP
      ============================================================ */
 
-  let lastT   = performance.now();
-  let elapsed = 0;
-  let firstFrame = true;
+  let lastT = performance.now(), elapsed = 0, firstFrame = true;
 
   function loop(now) {
     requestAnimationFrame(loop);
-
     const dt = Math.min((now - lastT) / 1000, 0.05);
-    lastT = now;
-    elapsed += dt;
+    lastT = now; elapsed += dt;
 
     if (resumeDelay > 0) resumeDelay -= dt;
     const autoOrbit = !dragging && resumeDelay <= 0;
@@ -617,7 +518,7 @@
   }
 
   /* ============================================================
-     10. BOOT
+     BOOT
      ============================================================ */
 
   resize();
