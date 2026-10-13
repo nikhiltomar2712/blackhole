@@ -1,79 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#000000" />
-<title>Gargantua — Black Hole</title>
-<style>
-  :root { color-scheme: dark; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; background: #000; overflow: hidden; }
-  body {
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-                 Helvetica, Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-  #stage { position: fixed; inset: 0; }
-  #scene {
-    display: block; width: 100%; height: 100%;
-    touch-action: none; cursor: grab; outline: none;
-  }
-  #scene:active { cursor: grabbing; }
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>Gargantua — Black Hole (Light-Eating)</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: #000; overflow: hidden; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                   Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    #stage { position: fixed; inset: 0; }
+    #scene {
+      display: block; width: 100%; height: 100%;
+      touch-action: none; cursor: grab; outline: none;
+    }
+    #scene:active { cursor: grabbing; }
 
-  .hud {
-    position: fixed;
-    left: clamp(18px, 4vw, 52px);
-    top: clamp(18px, 5vh, 44px);
-    pointer-events: none; user-select: none; z-index: 5;
-  }
-  .hud .title {
-    font-size: clamp(11px, 1.3vw, 14px);
-    font-weight: 600; letter-spacing: 0.42em; text-transform: uppercase;
-    color: rgba(255, 240, 220, 0.92);
-    text-shadow: 0 0 26px rgba(255, 160, 70, 0.35);
-  }
-  .hud .sub {
-    margin-top: 10px;
-    font-size: clamp(9px, 0.85vw, 10px);
-    letter-spacing: 0.3em; text-transform: uppercase;
-    color: rgba(255, 180, 120, 0.48);
-  }
+    .hud {
+      position: fixed;
+      left: clamp(18px, 4vw, 52px);
+      top: clamp(18px, 5vh, 44px);
+      pointer-events: none; user-select: none; z-index: 5;
+    }
+    .hud .title {
+      font-size: clamp(11px, 1.3vw, 14px);
+      font-weight: 600; letter-spacing: 0.42em; text-transform: uppercase;
+      color: rgba(255, 240, 220, 0.92);
+      text-shadow: 0 0 26px rgba(255, 160, 70, 0.35);
+    }
+    .hud .sub {
+      margin-top: 10px;
+      font-size: clamp(9px, 0.85vw, 10px);
+      letter-spacing: 0.3em; text-transform: uppercase;
+      color: rgba(255, 180, 120, 0.48);
+    }
 
-  .hint {
-    position: fixed; left: 50%; bottom: clamp(18px, 4.5vh, 40px);
-    transform: translateX(-50%);
-    font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.30);
-    pointer-events: none; user-select: none; white-space: nowrap; z-index: 5;
-    animation: hintPulse 5s ease-in-out infinite;
-  }
-  @keyframes hintPulse {
-    0%, 100% { opacity: 0.32; }
-    50%      { opacity: 0.82; }
-  }
+    .hint {
+      position: fixed; left: 50%; bottom: clamp(18px, 4.5vh, 40px);
+      transform: translateX(-50%);
+      font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.30);
+      pointer-events: none; user-select: none; white-space: nowrap; z-index: 5;
+      animation: hintPulse 5s ease-in-out infinite;
+    }
+    @keyframes hintPulse {
+      0%, 100% { opacity: 0.32; }
+      50%      { opacity: 0.82; }
+    }
 
-  .vignette {
-    position: fixed; inset: 0; pointer-events: none; z-index: 3;
-    background: radial-gradient(
-      ellipse at 50% 50%,
-      rgba(0,0,0,0) 40%,
-      rgba(0,0,0,0.35) 76%,
-      rgba(0,0,0,0.82) 100%
-    );
-  }
+    .vignette {
+      position: fixed; inset: 0; pointer-events: none; z-index: 3;
+      background: radial-gradient(
+        ellipse at 50% 50%,
+        rgba(0,0,0,0) 40%,
+        rgba(0,0,0,0.35) 76%,
+        rgba(0,0,0,0.82) 100%
+      );
+    }
 
-  #loader {
-    position: fixed; inset: 0; z-index: 10;
-    display: grid; place-items: center;
-    background: #000; color: rgba(255, 200, 150, 0.55);
-    font-size: 10px; letter-spacing: 0.34em; text-transform: uppercase;
-    transition: opacity 0.9s ease;
-  }
-  #loader.hidden { opacity: 0; pointer-events: none; }
-  @media (prefers-reduced-motion: reduce) { .hint { animation: none; } }
-</style>
+    #loader {
+      position: fixed; inset: 0; z-index: 10;
+      display: grid; place-items: center;
+      background: #000; color: rgba(255, 200, 150, 0.55);
+      font-size: 10px; letter-spacing: 0.34em; text-transform: uppercase;
+      transition: opacity 0.9s ease;
+    }
+    #loader.hidden { opacity: 0; pointer-events: none; }
+    @media (prefers-reduced-motion: reduce) { .hint { animation: none; } }
+  </style>
 </head>
 <body>
 
@@ -81,7 +81,7 @@
 
   <div class="hud">
     <div class="title">Gargantua</div>
-    <div class="sub">Schwarzschild&nbsp;·&nbsp;rs = 1</div>
+    <div class="sub">Schwarzschild&nbsp;·&nbsp;rs = 1 &nbsp;·&nbsp; light-eating</div>
   </div>
 
   <div class="hint">Drag to orbit&nbsp;&nbsp;·&nbsp;&nbsp;Scroll to zoom</div>
@@ -106,7 +106,7 @@
   import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
 
   /* ============================================================
-     SHADERS
+     SHADERS — Tilted black hole at 30 degrees
      ============================================================ */
 
   const VERTEX_SHADER = /* glsl */`
@@ -126,12 +126,25 @@
     uniform mat3  uCamBasis;
     uniform float uTanHalfFov;
 
-    #define STEPS        260
-    #define ESCAPE_R     90.0
+    #define STEPS        320
+    #define ESCAPE_R     130.0
     #define HORIZON_R    1.0
     #define PHOTON_R     1.5
-    #define DISK_IN      2.25
-    #define DISK_OUT     13.0
+    #define DISK_IN      2.0
+    #define DISK_OUT     18.0
+
+    /* ---------- 30 degree tilt matrix ---------- */
+    const float TILT = 0.5235987756; /* 30 degrees in radians */
+    mat3 tiltMat() {
+      float c = cos(TILT);
+      float s = sin(TILT);
+      /* Rotate around X axis by 30 degrees */
+      return mat3(
+        1.0, 0.0, 0.0,
+        0.0, c, -s,
+        0.0, s, c
+      );
+    }
 
     /* ---------- noise ---------- */
     vec3 hash33(vec3 p) {
@@ -164,7 +177,7 @@
       return s / norm;
     }
 
-    /* ---------- stars ---------- */
+    /* ---------- Small, faint star layer ---------- */
     vec3 starLayer(vec3 dir, float scale, float thr, float sz, float bright, vec3 tint) {
       vec3 p  = dir * scale;
       vec3 id = floor(p);
@@ -172,32 +185,68 @@
       float h = hash31(id);
       if (h < thr) return vec3(0.0);
       vec3 off = vec3(hash31(id + 11.7), hash31(id + 27.3), hash31(id + 51.1)) - 0.5;
-      off *= 0.72;
+      off *= 0.70;
       float d = length(f - off);
-      float s = smoothstep(sz, 0.0, d);
-      s *= s;
-      float tw = 0.78 + 0.22 * sin(uTime * 1.9 + h * 91.0);
+      /* small, soft stars — minimal glow */
+      float sharp = smoothstep(sz, sz * 0.2, d);
+      float glow  = smoothstep(sz * 1.8, 0.0, d) * 0.18;
+      float s = sharp * 0.9 + glow;
+      s = pow(s, 1.1);
+      float tw = 0.90 + 0.10 * sin(uTime * 1.5 + h * 91.0);
       return tint * (s * bright * tw);
     }
+
+    /* ---------- Dense field of small, faint stars ---------- */
     vec3 starfield(vec3 dir) {
       vec3 c = vec3(0.0);
-      c += starLayer(dir,  70.0, 0.935, 0.090, 1.15, vec3(1.00, 0.98, 0.95));
-      c += starLayer(dir, 140.0, 0.950, 0.075, 0.72, vec3(0.78, 0.88, 1.00));
-      c += starLayer(dir, 220.0, 0.958, 0.065, 0.46, vec3(1.00, 0.82, 0.62));
-      c += starLayer(dir, 380.0, 0.965, 0.050, 0.28, vec3(0.92, 0.94, 1.00));
+
+      /* tiny, faint stars — very high density */
+      c += starLayer(dir,  55.0, 0.965, 0.040, 0.42, vec3(1.00, 0.98, 0.95));
+      c += starLayer(dir,  80.0, 0.962, 0.038, 0.38, vec3(0.95, 0.97, 1.00));
+      c += starLayer(dir, 110.0, 0.958, 0.036, 0.35, vec3(0.92, 0.95, 1.00));
+      c += starLayer(dir, 150.0, 0.954, 0.034, 0.32, vec3(1.00, 0.94, 0.88));
+
+      /* tiny, faint stars — extremely high density */
+      c += starLayer(dir, 200.0, 0.948, 0.032, 0.29, vec3(0.90, 0.94, 1.00));
+      c += starLayer(dir, 270.0, 0.942, 0.030, 0.26, vec3(1.00, 0.92, 0.85));
+      c += starLayer(dir, 360.0, 0.936, 0.028, 0.23, vec3(0.88, 0.95, 1.00));
+      c += starLayer(dir, 480.0, 0.930, 0.026, 0.20, vec3(0.95, 0.96, 1.00));
+
+      /* very faint, tiny stars — background density */
+      c += starLayer(dir, 640.0, 0.922, 0.024, 0.17, vec3(1.00, 0.90, 0.82));
+      c += starLayer(dir, 850.0, 0.916, 0.022, 0.15, vec3(0.92, 0.94, 1.00));
+      c += starLayer(dir, 1150.0, 0.910, 0.020, 0.13, vec3(0.95, 0.92, 0.98));
+      c += starLayer(dir, 1550.0, 0.904, 0.018, 0.11, vec3(1.00, 0.95, 0.90));
+
+      /* extremely faint, tiny stars — deep background */
+      c += starLayer(dir, 2100.0, 0.898, 0.016, 0.09, vec3(0.90, 0.95, 1.00));
+      c += starLayer(dir, 2850.0, 0.892, 0.014, 0.08, vec3(0.95, 0.88, 0.95));
+      c += starLayer(dir, 3900.0, 0.886, 0.012, 0.06, vec3(0.88, 0.94, 1.00));
+      c += starLayer(dir, 5300.0, 0.880, 0.011, 0.05, vec3(1.00, 0.92, 0.85));
+      c += starLayer(dir, 7200.0, 0.874, 0.010, 0.04, vec3(0.92, 0.96, 1.00));
+      c += starLayer(dir, 9800.0, 0.868, 0.009, 0.03, vec3(0.95, 0.94, 1.00));
+
       return c;
     }
+
     vec3 background(vec3 dir) {
-      float n  = fbm2(vec2(dir.x, dir.z) * 2.0 + dir.y * 1.7);
-      float n2 = fbm2(vec2(dir.y, dir.x) * 4.5 - dir.z * 1.3);
-      vec3 haze = mix(vec3(0.0018, 0.0028, 0.0080),
-                      vec3(0.0140, 0.0065, 0.0215), n * 0.7 + n2 * 0.3);
-      haze *= 0.40 + 0.55 * smoothstep(-0.75, 0.75, dir.y);
-      return haze + starfield(dir);
+      vec3 c = vec3(0.0);
+
+      /* deep space haze — subtle, blended */
+      float n  = fbm2(vec2(dir.x, dir.z) * 1.8 + dir.y * 1.5);
+      float n2 = fbm2(vec2(dir.y, dir.x) * 4.0 - dir.z * 1.2);
+      vec3 haze = mix(vec3(0.0010, 0.0015, 0.0045),
+                      vec3(0.0055, 0.0030, 0.0085), n * 0.65 + n2 * 0.35);
+      haze *= 0.15 + 0.85 * smoothstep(-0.75, 0.75, dir.y);
+      c += haze;
+
+      /* dense starfield of small, faint stars */
+      c += starfield(dir);
+
+      return c;
     }
 
-    /* ---------- accretion disk ---------- */
-
+    /* ---------- accretion disk — softer, blended ---------- */
     float relativisticBoost(vec3 pos, vec3 rd, float r) {
       float v = sqrt(0.5 / max(r - 1.0, 0.35));
       v = min(v, 0.86);
@@ -217,20 +266,22 @@
       float ang   = phi + uTime * omega;
       vec2 q = vec2(cos(ang), sin(ang)) * r;
 
-      float n1 = fbm2a(q * 0.42 + vec2(0.0, uTime * 0.10));
-      float n2 = fbm2a(q * 1.15 - vec2(uTime * 0.15, 0.0));
-      float n3 = fbm2a(q * 3.20 + vec2(uTime * 0.22, uTime * 0.08));
-      float n  = n1 * 0.55 + n2 * 0.30 + n3 * 0.15;
+      float n1 = fbm2a(q * 0.35 + vec2(0.0, uTime * 0.10));
+      float n2 = fbm2a(q * 0.95 - vec2(uTime * 0.15, 0.0));
+      float n3 = fbm2a(q * 2.60 + vec2(uTime * 0.20, uTime * 0.08));
+      float n4 = fbm2a(q * 6.5 + vec2(uTime * 0.35, uTime * 0.20));
+      float n  = n1 * 0.42 + n2 * 0.30 + n3 * 0.19 + n4 * 0.09;
 
-      float armPhase = ang * 2.0 - log(r) * 5.5 + uTime * 0.35;
-      float arms     = 0.62 + 0.38 * sin(armPhase);
+      float armPhase = ang * 2.0 - log(r) * 5.0 + uTime * 0.32;
+      float arms     = 0.55 + 0.45 * sin(armPhase);
 
-      float rin  = smoothstep(DISK_IN, DISK_IN + 1.35, r);
-      float rout = 1.0 - smoothstep(DISK_OUT * 0.42, DISK_OUT, r);
-      float ring = 1.0 + 0.55 * exp(-pow((r - 3.4) * 0.75, 2.0));
+      float rin  = smoothstep(DISK_IN, DISK_IN + 1.5, r);
+      float rout = 1.0 - smoothstep(DISK_OUT * 0.5, DISK_OUT * 1.2, r);
+      float ring = 1.0 + 0.65 * exp(-pow((r - 3.8) * 0.60, 2.0));
+      float midDark = 1.0 - 0.55 * exp(-pow((r - 6.5) * 0.50, 2.0));
 
-      float density = rin * rout * ring * arms * (0.28 + 1.25 * n);
-      density = pow(clamp(density, 0.0, 1.6), 1.35);
+      float density = rin * rout * ring * arms * (0.20 + 1.25 * n) * midDark;
+      density = pow(clamp(density, 0.0, 2.0), 1.15);
 
       float t = clamp((r - DISK_IN) / (DISK_OUT - DISK_IN), 0.0, 1.0);
       vec3 cCore  = vec3(1.00, 0.99, 0.96);
@@ -243,17 +294,21 @@
       col      = mix(col,   cCool, smoothstep(0.50, 1.00, t));
 
       float boost = relativisticBoost(p, rd, r);
-      float path  = clamp(0.30 / max(abs(rd.y), 0.14), 0.5, 2.4);
+      float path  = clamp(0.28 / max(abs(rd.y), 0.10), 0.4, 2.5);
 
-      /* reduced emission scale (was 4.2) */
-      return col * density * boost * path * 2.1;
+      return col * density * boost * path * 2.0;
     }
 
-    /* ---------- main ---------- */
+    /* ---------- main ray marching — tilted at 30 degrees ---------- */
     void main() {
       vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution) / uResolution.y;
       vec3 rd = normalize(uCamBasis * vec3(uv * uTanHalfFov, 1.0));
       vec3 ro = uCamPos;
+
+      /* Apply 30-degree tilt to camera rays and position */
+      mat3 T = tiltMat();
+      ro = T * ro;
+      rd = T * rd;
 
       vec3  hv = cross(ro, rd);
       float h2 = dot(hv, hv);
@@ -272,8 +327,8 @@
         if (r < HORIZON_R) { captured = true; break; }
         if (r > ESCAPE_R && dot(pos, dir) > 0.0) break;
 
-        float dt = 0.055 * r * r / (hm + 0.6);
-        dt = clamp(dt, 0.010, 3.0);
+        float dt = 0.050 * r * r / (hm + 0.5);
+        dt = clamp(dt, 0.008, 2.8);
 
         float r2 = r * r;
         vec3  acc = -1.5 * h2 * pos / (r2 * r2 * r);
@@ -288,7 +343,7 @@
           if (rr > DISK_IN && rr < DISK_OUT) {
             vec3 e = diskSample(hit, normalize(dir), rr);
             col   += trans * e;
-            trans *= 1.0 - clamp(dot(e, vec3(0.30)) * 0.55, 0.0, 0.78);
+            trans *= 1.0 - clamp(dot(e, vec3(0.35)) * 0.55, 0.0, 0.78);
           }
         }
         pos = npos;
@@ -297,12 +352,36 @@
       }
 
       vec3 outc = col;
-      if (!captured) outc += trans * background(normalize(dir));
 
-      /* softer photon ring (was 0.28) */
-      float rq   = (minR - PHOTON_R) * 4.2;
+      /* --- LIGHT EATING: pure black shadow with soft transition --- */
+      if (captured) {
+        /* event horizon — pure black, but with a soft edge blend */
+        outc = vec3(0.0);
+        /* subtle gravitational glow just outside the horizon — softer */
+        float glow = exp(-(minR - HORIZON_R) * 6.0) * 0.04;
+        outc += vec3(1.0, 0.6, 0.3) * glow;
+      } else {
+        /* background light gets through — blended and soft */
+        outc += trans * background(normalize(dir));
+      }
+
+      /* photon ring — softer, more blended */
+      float rq   = (minR - PHOTON_R) * 3.2;
       float ring = exp(-rq * rq);
-      outc += vec3(1.00, 0.78, 0.52) * ring * 0.14;
+      outc += vec3(1.00, 0.75, 0.48) * ring * 0.18;
+
+      /* blue-shift halo near horizon — softer */
+      float halo = exp(-(minR - 1.0) * 2.5) * 0.08;
+      outc += vec3(0.5, 0.7, 1.0) * halo;
+
+      /* extra darkening for the shadow region — soft blend */
+      if (captured) {
+        outc *= 0.04;   /* slightly more than pure black to blend */
+      }
+
+      /* final soft vignette from the shader itself for realism */
+      float vig = 1.0 - 0.25 * length(uv);
+      outc *= vig;
 
       gl_FragColor = vec4(outc, 1.0);
     }
@@ -322,7 +401,7 @@
   });
   renderer.setClearColor(0x000000, 1);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.82;   // <-- reduced from 1.05
+  renderer.toneMappingExposure = 0.88;
 
   let quality = 1.0;
 
@@ -344,7 +423,7 @@
   });
 
   /* ============================================================
-     POST-PROCESSING  (bloom toned down)
+     POST-PROCESSING — soft bloom for blended, realistic look
      ============================================================ */
 
   const composer = new EffectComposer(renderer);
@@ -352,9 +431,9 @@
 
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.42,   // strength  (was 0.92)
-    0.58,   // radius
-    0.72    // threshold (raised so only the hottest core blooms)
+    0.50,   // slightly lower strength to keep stars subtle
+    0.60,   // tighter radius
+    0.75    // higher threshold — only brightest core blooms
   );
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
@@ -456,7 +535,7 @@
 
     let dpr = Math.min(window.devicePixelRatio || 1, 2.0);
     const pixels = w * h * dpr * dpr;
-    const maxPixels = 5.2e6;
+    const maxPixels = 5.8e6;
     if (pixels > maxPixels) dpr *= Math.sqrt(maxPixels / pixels);
     dpr *= quality;
 
