@@ -72,7 +72,7 @@
       transition:opacity .9s ease;
     }
     #loader.done{ opacity:0; pointer-events:none; }
-    .l-txt{ font-size:10px; letter-spacing:.42em; color:var(--amber-dim); }
+    .l-txt{ font-size:10px; letter-spacing:.42em; color:var(--amber-dim); text-align:center; }
     .l-bar{ width:150px; height:1px; background:rgba(178,192,204,.14); overflow:hidden; position:relative; }
     .l-bar i{ position:absolute; left:0; top:0; height:100%; width:40%; background:var(--amber); animation:sweep 1.2s ease-in-out infinite; }
     @keyframes sweep{ 0%{ transform:translateX(-110%);} 100%{ transform:translateX(380%);} }
@@ -91,9 +91,6 @@
       .hud-bc{ bottom:20px; }
     }
   </style>
-  <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
-  </script>
 </head>
 <body>
   <div id="stage" aria-label="Interactive black hole visualization"></div>
@@ -125,58 +122,65 @@
 
   <div class="hud hud-br">
     <div id="hudRes">—</div>
-    <div class="tag">VOLUMETRIC &middot; VERLET &middot; TAA</div>
+    <div class="tag">WEBGL2 &middot; PHOTON-SPHERE EMISSION &middot; TAA</div>
   </div>
-  <div class="hud hud-bc" id="hint">DRAG — ORBIT&nbsp;&nbsp;·&nbsp;&nbsp;SCROLL / PINCH — APPROACH&nbsp;&nbsp;·&nbsp;&nbsp;SETTLE — SUPER-RES</div>
+  <div class="hud hud-bc" id="hint">DRAG — ORBIT&nbsp;&nbsp;·&nbsp;&nbsp;SCROLL / PINCH — APPROACH&nbsp;&nbsp;·&nbsp;&nbsp;SETTLE — SUPER-RES&nbsp;&nbsp;·&nbsp;&nbsp;DBLCLICK — RESET</div>
 
   <div id="loader" aria-hidden="true">
-    <div class="l-txt">INTEGRATING NULL GEODESICS</div>
+    <div class="l-txt" id="lTxt">INITIALIZING CONTEXT</div>
     <div class="l-bar"><i></i></div>
   </div>
 
   <div id="fallback" hidden>
-    <div>WEBGL UNAVAILABLE<br>THIS INSTRUMENT REQUIRES GPU ACCELERATION</div>
+    <div>WEBGL2 UNAVAILABLE<br>THIS INSTRUMENT REQUIRES GPU ACCELERATION</div>
   </div>
 
   <script type="module">
-    import * as THREE from 'three';
-
     /* ==================================================================== */
-    /*  0. CONFIG — camera near-equatorial, disk tilted 30° in shader       */
+    /*  0. CONFIG                                                            */
     /* ==================================================================== */
     const CONFIG = {
-      fov: 58,
+      fov: 50,                    // tighter FOV — the hole fills the frame
       theta0: 0.9,
-      phi0: 0.18,
-      radius0: 23,
-      radiusHome: 17,
-      minR: 4.6,
-      maxR: 40,
+      phi0: 0.16,
+      radius0: 21,
+      radiusHome: 13.8,           // closer default orbit
+      minR: 4.2,
+      maxR: 42,
       autoDelay: 4,
-      autoSpeed: 0.028,
-      pixelCap: 1.25,          // temporal accumulation recovers sharpness, so we cap DPR lower
-      tilt: 30 * Math.PI / 180,// ← black hole / disk tilt = 30°
-      bloom: { strength: 0.85, threshold: 0.85, knee: 0.55 },
-      exposure: 1.12,
-      aaStill: 0.07,           // accumulation blend when still  (≈ ×14 effective supersample)
-      aaMove: 0.60,            // blend when the camera is moving (≈ ×1.7, responsive)
+      autoSpeed: 0.024,
+      tilt: 30 * Math.PI / 180,   // ← black hole / disk tilt = 30°
+      bloom: { strength: 1.05, threshold: 0.78, knee: 0.50 },
+      exposure: 1.18,
+      aaStill: 0.08,
+      aaMove: 0.60,
+      frameBudget: 13.5,
     };
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    /* ==================================================================== */
-    /*  1. SHADERS                                                           */
-    /* ==================================================================== */
-    const VERT = /* glsl */`
-      varying vec2 vUv;
-      void main(){
-        vUv = uv;
-        gl_Position = vec4(position.xy, 0.0, 1.0);
-      }
-    `;
+    const stage = document.getElementById('stage');
+    const lTxt  = document.getElementById('lTxt');
 
-    /* ---- geodesic ray-marcher: volumetric disk, Verlet integrator ---- */
-    const RAYMARCH = /* glsl */`
+    /* ==================================================================== */
+    /*  1. SHADERS (GLSL ES 3.00)                                            */
+    /* ==================================================================== */
+    const VS = `#version 300 es
+out vec2 vUv;
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vUv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+    const FS_HEAD = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+`;
+
+    /* ---- geodesic ray-marcher: volumetric disk + photon-sphere ring ---- */
+    const RAYMARCH = `
       uniform vec2  uRes;
       uniform float uTime;
       uniform vec3  uCamPos;
@@ -185,15 +189,16 @@
       uniform vec3  uCamUp;
       uniform float uTanHalfFov;
       uniform float uEscape;
-      uniform float uTilt;
-      uniform vec2  uJitter;      // sub-pixel TAA jitter
-      uniform float uStepMul;     // perf governor: coarsens integration steps
+      uniform float uTilt;          // ← black hole tilt (radians)
+      uniform vec2  uJitter;        // sub-pixel TAA jitter
+      uniform float uStepMul;       // perf governor
+      uniform float uDetail;        // perf gate: extra turbulence octave
 
-      const float RS       = 1.0;
-      const float DISK_IN  = 2.6;
-      const float DISK_OUT = 14.0;
-      const int   STEPS    = 300;
-      const float FLOW_T   = 16.0;
+      const float RS     = 1.0;
+      const float D_IN   = 2.3;     // inner edge, deep inside ISCO (plunging matter)
+      const float D_OUT  = 16.5;    // ← bigger disk
+      const int   STEPS  = 230;
+      const float FLOW_T = 16.0;
 
       float hash13(vec3 p){
         p = fract(p * 0.1031);
@@ -209,93 +214,107 @@
         vec3 i = floor(p), f = fract(p);
         f = f * f * (3.0 - 2.0 * f);
         return mix(
-          mix(mix(hash13(i),                       hash13(i + vec3(1.0, 0.0, 0.0)), f.x),
-              mix(hash13(i + vec3(0.0, 1.0, 0.0)), hash13(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
-          mix(mix(hash13(i + vec3(0.0, 0.0, 1.0)), hash13(i + vec3(1.0, 0.0, 1.0)), f.x),
-              mix(hash13(i + vec3(0.0, 1.0, 1.0)), hash13(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+          mix(mix(hash13(i),                     hash13(i + vec3(1.0,0.0,0.0)), f.x),
+              mix(hash13(i + vec3(0.0,1.0,0.0)), hash13(i + vec3(1.0,1.0,0.0)), f.x), f.y),
+          mix(mix(hash13(i + vec3(0.0,0.0,1.0)), hash13(i + vec3(1.0,0.0,1.0)), f.x),
+              mix(hash13(i + vec3(0.0,1.0,1.0)), hash13(i + vec3(1.0,1.0,1.0)), f.x), f.y),
           f.z);
       }
-      float fbm3(vec3 p){
-        float v = 0.0, a = 0.5;
-        for (int i = 0; i < 3; i++){
-          v += a * vnoise3(p);
-          p = p * 2.03 + vec3(11.7);
-          a *= 0.5;
-        }
-        return v;
+      float fbm2(vec3 p){
+        return vnoise3(p) * 0.65 + vnoise3(p * 2.07 + 11.7) * 0.35;
       }
 
       /* flared slab half-thickness of the disk */
-      float diskH(float r){
-        return min(0.16 + 0.05 * max(r - DISK_IN, 0.0), 0.62);
-      }
+      float diskH(float r){ return min(0.15 + 0.045 * max(r - D_IN, 0.0), 0.60); }
 
-      /* blackbody-flavoured palette: ember → orange → white → blue-white when blueshifted */
+      /* blackbody-flavoured ramp: ember → orange → white → blue-white */
       vec3 diskRamp(float h){
         h = clamp(h, 0.0, 1.5);
-        vec3 c = mix(vec3(0.045, 0.006, 0.002), vec3(0.65, 0.10, 0.022), smoothstep(0.00, 0.32, h));
-        c = mix(c, vec3(1.00, 0.44, 0.10), smoothstep(0.28, 0.58, h));
-        c = mix(c, vec3(1.00, 0.80, 0.47), smoothstep(0.52, 0.82, h));
-        c = mix(c, vec3(1.00, 0.97, 0.90), smoothstep(0.78, 1.08, h));
-        c = mix(c, vec3(0.82, 0.90, 1.00), smoothstep(1.05, 1.45, h));
+        vec3 c = mix(vec3(0.045,0.006,0.002), vec3(0.65,0.10,0.022), smoothstep(0.00,0.32,h));
+        c = mix(c, vec3(1.00,0.44,0.10), smoothstep(0.28,0.58,h));
+        c = mix(c, vec3(1.00,0.80,0.47), smoothstep(0.52,0.82,h));
+        c = mix(c, vec3(1.00,0.97,0.90), smoothstep(0.78,1.08,h));
+        c = mix(c, vec3(0.82,0.90,1.00), smoothstep(1.05,1.45,h));
         return c;
       }
 
-      /* volumetric disk sample: rgb = emission per unit length, w = extinction */
+      /* ==================================================================
+         PHOTON RING — emission concentrated on the photon sphere (r=1.5 rs).
+         Weighted toward ORBITING rays (small radial velocity): these are the
+         photons that loop the hole before escaping — the thin bright ring
+         that hugs the shadow in real EHT imagery. Doppler-asymmetric, same
+         orbital sense as the disk, so the bright arc matches the disk's.
+         ================================================================== */
+      vec3 photonRing(float r, vec3 p, vec3 v){
+        float band = exp(-((r - 1.5) * (r - 1.5)) * 9.0);   // σ ≈ 0.33 rs
+        if (band < 0.01) return vec3(0.0);
+
+        float vr  = abs(dot(normalize(v), p / r));          // radial speed fraction
+        float orb = smoothstep(0.62, 0.18, vr);             // lingerers only
+        float eq  = exp(-p.y * p.y * 1.6);                  // disk-lit → equatorial
+
+        float beta = 0.58;                                  // orbital v/c near r=1.5
+        vec3 tang  = vec3(-p.z, 0.0, p.x) / max(r, 1e-3);
+        float gam  = inversesqrt(1.0 - beta * beta);
+        float dop  = 1.0 / (gam * (1.0 + beta * dot(tang, normalize(v))));
+        float grav = sqrt(max(1.0 - 1.0 / r, 0.02));
+        float g    = clamp(dop * grav, 0.55, 1.55);
+
+        vec3 tint = mix(vec3(1.0, 0.52, 0.20), vec3(1.0, 0.97, 0.90), smoothstep(0.75, 1.35, g));
+        return tint * (band * orb * eq * pow(g, 2.4) * 1.05);
+      }
+
+      /* volumetric disk sample: rgb = emission, a = extinction */
       vec4 diskVolume(vec3 p, vec3 vdir){
         float r = length(p.xz);
-        if (r < 1.35 || r > DISK_OUT) return vec4(0.0);
-
+        if (r < 1.35 || r > D_OUT) return vec4(0.0);
         float H = diskH(r);
-        float vprof = exp(-p.y * p.y / (2.0 * H * H + 1e-5));
-        if (vprof < 0.015) return vec4(0.0);
+        float vprof = exp(-p.y * p.y / (2.0 * H * H + 1e-4));
+        if (vprof < 0.02) return vec4(0.0);
 
-        /* seam-free polar turbulence, advected by Keplerian shear (dual-phase crossfade) */
-        float lr   = log(r);
-        float phi  = atan(p.z, p.x);
-        float omg  = 2.2 * pow(r, -1.5);
-        float ph   = uTime / FLOW_T;
-        float f1   = fract(ph);
-        float f2   = fract(ph + 0.5);
-        float w    = abs(f1 * 2.0 - 1.0);
+        /* seam-free polar turbulence advected by Keplerian shear */
+        float phi = atan(p.z, p.x);
+        float lr  = log(r);
+        float omg = 2.2 * pow(r, -1.5);
+        float k  = uTime / FLOW_T;
+        float f1 = fract(k), f2 = fract(k + 0.5);
+        float w  = abs(f1 * 2.0 - 1.0);
         float spir = 2.8 * lr;
         float a1 = (f1 - 0.5) * FLOW_T * omg + spir;
         float a2 = (f2 - 0.5) * FLOW_T * omg + spir;
         float c1 = cos(phi - a1), s1 = sin(phi - a1);
         float c2 = cos(phi - a2), s2 = sin(phi - a2);
-        float n = mix(
-          fbm3(vec3(c1 * 2.2, s1 * 2.2, lr * 6.0)) + 0.5 * vnoise3(vec3(c1 * 6.5, s1 * 6.5, lr * 15.0)),
-          fbm3(vec3(c2 * 2.2, s2 * 2.2, lr * 6.0)) + 0.5 * vnoise3(vec3(c2 * 6.5, s2 * 6.5, lr * 15.0)),
-          w);
-        float dens = pow(smoothstep(0.30, 0.92, n), 1.3);
+        float n = mix(fbm2(vec3(c1 * 2.3, s1 * 2.3, lr * 5.5)),
+                      fbm2(vec3(c2 * 2.3, s2 * 2.3, lr * 5.5)), w);
+        if (uDetail > 0.5) n = n * 0.8 + 0.2 * vnoise3(vec3(c1 * 6.5, s1 * 6.5, lr * 13.0));
 
-        float edge   = smoothstep(DISK_IN - 0.25, DISK_IN + 0.55, r);      // main disk inner edge
-        float fade   = 1.0 - smoothstep(DISK_OUT - 3.5, DISK_OUT - 0.4, r);// outer fade
-        float plunge = 0.16 * (1.0 - smoothstep(1.5, DISK_IN, r));         // faint infalling streams inside ISCO
+        float dens = pow(smoothstep(0.30, 0.92, n), 1.3);
+        float edge   = smoothstep(D_IN - 0.25, D_IN + 0.55, r);
+        float fade   = 1.0 - smoothstep(D_OUT - 3.5, D_OUT - 0.4, r);
+        float plunge = 0.20 * (1.0 - smoothstep(1.5, D_IN, r));  // ← brighter infalling streams
         float body = dens * (edge * fade + plunge) * vprof;
         if (body < 0.004) return vec4(0.0);
 
-        /* relativistic framing: Keplerian beta, Doppler beaming, gravitational shift */
-        float beta = clamp(sqrt(0.5 / max(r - 1.0, 0.8)), 0.0, 0.80); // v/c — 0.5 at ISCO
-        vec3  tang = vec3(-p.z, 0.0, p.x) / r;                        // prograde orbital direction
-        float gam  = inversesqrt(1.0 - beta * beta);
-        float dop  = 1.0 / (gam * (1.0 + beta * dot(tang, normalize(vdir))));
+        /* Keplerian beta, Doppler beaming, gravitational shift */
+        float beta = clamp(sqrt(0.5 / max(r - 1.0, 0.8)), 0.0, 0.80);
+        vec3 tang = vec3(-p.z, 0.0, p.x) / r;
+        float gam = inversesqrt(1.0 - beta * beta);
+        float dop = 1.0 / (gam * (1.0 + beta * dot(tang, normalize(vdir))));
         float grav = sqrt(max(1.0 - 1.0 / r, 0.04));
-        float g    = dop * grav;                                      // total frequency ratio
+        float g = dop * grav;
 
-        float heat = pow(DISK_IN / r, 0.75) * (0.82 + 0.34 * n) * g;   // T ∝ r^-3/4, shifted by g
-        vec3  col  = diskRamp(heat);
-        float radial = pow(DISK_IN / r, 2.0);
-        float boost  = pow(clamp(g, 0.45, 2.1), 3.0);                  // bolometric beaming
-        vec3  e = min(col * (body * radial * boost * 6.5), vec3(28.0));
-        return vec4(e, body * 3.0);
+        float heat = pow(D_IN / r, 0.75) * (0.82 + 0.34 * n) * g;
+        vec3 col = diskRamp(heat);
+        float radial = pow(D_IN / r, 2.0);
+        float boost  = pow(clamp(g, 0.45, 2.1), 3.0);
+        vec3 e = min(col * (body * radial * boost * 7.0), vec3(28.0));  // ← hotter
+        return vec4(e, body * 2.6);                                      // ← thinner
       }
 
       /* ---- starfield with galactic band and dust lanes ---- */
       vec3 starLayer(vec3 d, float scale, float bright){
         vec3 p  = d * scale;
-        vec3 id = floor(p);
-        vec3 f  = fract(p);
+        vec3 id = floor(p), f = fract(p);
         vec3 h1 = hash33(id);
         vec3 h2 = hash33(id + 43.7);
         vec3 sp = 0.2 + 0.6 * h1;
@@ -305,44 +324,38 @@
         float halo = exp(-d2 * 16.0) * 0.14;
         float mag  = pow(h2.x, 16.0);
         float tw   = 0.78 + 0.22 * sin(uTime * (0.4 + h2.z * 2.2) + h2.y * 6.2831);
-        vec3 tint  = mix(vec3(1.00, 0.85, 0.66), vec3(0.66, 0.78, 1.00), h2.y);
+        vec3 tint  = mix(vec3(1.00,0.85,0.66), vec3(0.66,0.78,1.00), h2.y);
         return (core + halo) * mag * bright * tw * tint;
       }
-
       vec3 background(vec3 d){
         vec3 col = vec3(0.0016, 0.0024, 0.0044);
         vec3 bn  = normalize(vec3(0.42, 0.62, 0.35));
         float bd   = dot(d, bn);
         float band = exp(-bd * bd * 10.0);
-        float neb  = fbm3(d * 2.6) * 0.62 + fbm3(d * 6.3) * 0.38;
-        float dust = fbm3(d * 4.4 + 13.1);
-
+        float neb  = fbm2(d * 2.6) * 0.62 + fbm2(d * 6.3) * 0.38;
+        float dust = fbm2(d * 4.4 + 13.1);
         col += starLayer(d, 55.0, 2.4);
         col += starLayer(d, 118.0, 0.9);
         col += starLayer(d, 235.0, 0.38);
-
-        vec3 glow = mix(vec3(0.018, 0.028, 0.052), vec3(0.065, 0.046, 0.034), neb);
+        vec3 glow = mix(vec3(0.018,0.028,0.052), vec3(0.065,0.046,0.034), neb);
         col += glow * band * (0.35 + 0.65 * neb);
-        col += vec3(0.030, 0.020, 0.014) * band * pow(fbm3(d * 3.2 + 5.0), 2.0) * 0.8;
-
-        /* dust lanes silhouette the starfield */
+        col += vec3(0.030,0.020,0.014) * band * pow(fbm2(d * 3.2 + 5.0), 2.0) * 0.8;
         col *= 1.0 - band * 0.55 * smoothstep(0.42, 0.78, dust) * (0.4 + 0.6 * neb);
         return col;
       }
 
-      /* ---- null geodesic integrator (velocity-Verlet, h² held exactly) ---- */
+      /* ---- null geodesic integrator (velocity-Verlet, h² conserved) ---- */
       vec3 traceRay(vec3 ro, vec3 rd, out bool captured){
-        /* tilt the hole (disk) by uTilt about the X axis */
         float ct = cos(uTilt), st = sin(uTilt);
-        mat3 tilt = mat3(1.0, 0.0, 0.0,   0.0, ct, -st,   0.0, st, ct);
+        mat3 tilt = mat3(1.0,0.0,0.0,  0.0,ct,-st,  0.0,st,ct);
         ro = tilt * ro;
         rd = tilt * rd;
 
-        vec3 p = ro;
-        vec3 v = rd;
+        vec3 p = ro, v = rd;
         vec3 hv = cross(p, v);
         float h2 = dot(hv, hv);
-        vec3 a = -1.5 * h2 * p / pow(dot(p, p), 2.5);
+        float r2a = dot(p, p);
+        vec3 a = -1.5 * h2 * p / (r2a * r2a * sqrt(r2a));
 
         vec3 col = vec3(0.0);
         float T = 1.0;
@@ -354,17 +367,22 @@
           if (r < RS){ captured = true; break; }
           if (r > uEscape && dot(p, v) > 0.0) break;
 
-          /* adaptive step: fine near the hole, fine inside the disk slab */
+          /* adaptive step: fine near the hole and inside the disk slab */
           float dt = clamp(r * 0.08, 0.035, 1.35);
           float rxz = length(p.xz);
-          if (rxz > 1.3 && rxz < DISK_OUT + 2.5){
-            float H  = diskH(rxz);
+          if (rxz > 1.3 && rxz < D_OUT + 2.5){
             float ay = abs(p.y);
-            if (ay < 2.4 * H + 0.14)                dt = min(dt, 0.16);
-            else if (p.y * (p.y + v.y * dt) < 0.0)  dt = min(dt, 0.22);
+            float H  = diskH(rxz);
+            if (ay < 2.4 * H + 0.14)                dt = min(dt, 0.18);
+            else if (p.y * (p.y + v.y * dt) < 0.0)  dt = min(dt, 0.24);
             else if (ay < 1.9)                      dt = min(dt, 0.45);
           }
           dt *= uStepMul;
+
+          /* ← photon-sphere emission, integrated by path length */
+          if (r < 2.25 && r > 1.12){
+            col += T * photonRing(r, p, v) * dt;
+          }
 
           /* kick-drift-kick */
           vec3 vh = v + a * (0.5 * dt);
@@ -374,10 +392,10 @@
           vec3 an = -1.5 * h2 * pn / (rn2 * rn2 * sqrt(rn2));
           vec3 vn = vh + an * (0.5 * dt);
 
-          /* volumetric accretion disk, sampled at the segment midpoint */
+          /* volumetric accretion disk at segment midpoint */
           vec3 pm = 0.5 * (p + pn);
           float q2 = dot(pm.xz, pm.xz);
-          if (q2 < DISK_OUT * DISK_OUT && q2 > 1.8 && abs(pm.y) < 2.6){
+          if (q2 < D_OUT * D_OUT && q2 > 1.8 && abs(pm.y) < 1.8){
             vec4 er = diskVolume(pm, vh);
             if (er.a > 0.0){
               col += T * er.rgb * dt;
@@ -399,77 +417,68 @@
         vec3 rd = normalize(uCamFwd + uTanHalfFov * (sc.x * uCamRight + sc.y * uCamUp));
         bool captured;
         vec3 col = traceRay(uCamPos, rd, captured);
-        gl_FragColor = vec4(max(col, vec3(0.0)), 1.0);
+        fragColor = vec4(max(col, vec3(0.0)), 1.0);
       }
     `;
 
     /* ---- temporal accumulation (TAA supersampling) ---- */
-    const ACCUM = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D tCurrent;
-      uniform sampler2D tHistory;
+    const ACCUM = `
+      uniform highp sampler2D tCurrent;
+      uniform highp sampler2D tHistory;
       uniform float uBlend;
       void main(){
-        vec3 c = mix(texture2D(tHistory, vUv).rgb, texture2D(tCurrent, vUv).rgb, uBlend);
-        gl_FragColor = vec4(c, 1.0);
+        vec3 c = mix(texture(tHistory, vUv).rgb, texture(tCurrent, vUv).rgb, uBlend);
+        fragColor = vec4(c, 1.0);
       }
     `;
 
     /* ---- bloom: soft-knee bright pass ---- */
-    const BRIGHT = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D tDiffuse;
+    const BRIGHT = `
+      uniform highp sampler2D tDiffuse;
       uniform float uThresh;
       uniform float uKnee;
       void main(){
-        vec3 c = texture2D(tDiffuse, vUv).rgb;
+        vec3 c = texture(tDiffuse, vUv).rgb;
         float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
         float t = clamp((l - uThresh) / max(uKnee, 1e-3), 0.0, 1.0);
-        gl_FragColor = vec4(c * (t * t * (3.0 - 2.0 * t)), 1.0);
+        fragColor = vec4(c * (t * t * (3.0 - 2.0 * t)), 1.0);
       }
     `;
 
     /* ---- bloom: Kawase downsample ---- */
-    const DOWN = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D tDiffuse;
+    const DOWN = `
+      uniform highp sampler2D tDiffuse;
       uniform vec2 uTexel;
       void main(){
         vec2 o = uTexel * 0.5;
-        vec3 c = texture2D(tDiffuse, vUv + vec2(-o.x, -o.y)).rgb
-               + texture2D(tDiffuse, vUv + vec2( o.x, -o.y)).rgb
-               + texture2D(tDiffuse, vUv + vec2(-o.x,  o.y)).rgb
-               + texture2D(tDiffuse, vUv + vec2( o.x,  o.y)).rgb;
-        gl_FragColor = vec4(c * 0.25, 1.0);
+        vec3 c = texture(tDiffuse, vUv + vec2(-o.x,-o.y)).rgb
+               + texture(tDiffuse, vUv + vec2( o.x,-o.y)).rgb
+               + texture(tDiffuse, vUv + vec2(-o.x, o.y)).rgb
+               + texture(tDiffuse, vUv + vec2( o.x, o.y)).rgb;
+        fragColor = vec4(c * 0.25, 1.0);
       }
     `;
 
-    /* ---- bloom: tent upsample + recombine with same-level detail ---- */
-    const UP = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D tLow;
-      uniform sampler2D tSame;
+    /* ---- bloom: tent upsample + recombine ---- */
+    const UP = `
+      uniform highp sampler2D tLow;
+      uniform highp sampler2D tSame;
       uniform vec2 uTexel;
       void main(){
         vec2 o = uTexel;
-        vec3 c = 4.0 * texture2D(tLow, vUv).rgb
-          + 2.0 * texture2D(tLow, vUv + vec2( o.x, 0.0)).rgb
-          + 2.0 * texture2D(tLow, vUv + vec2(-o.x, 0.0)).rgb
-          + 2.0 * texture2D(tLow, vUv + vec2(0.0,  o.y)).rgb
-          + 2.0 * texture2D(tLow, vUv + vec2(0.0, -o.y)).rgb
-          + texture2D(tLow, vUv + o).rgb
-          + texture2D(tLow, vUv - o).rgb
-          + texture2D(tLow, vUv + vec2( o.x, -o.y)).rgb
-          + texture2D(tLow, vUv + vec2(-o.x,  o.y)).rgb;
-        gl_FragColor = vec4(texture2D(tSame, vUv).rgb + c / 16.0, 1.0);
+        vec3 c = 4.0 * texture(tLow, vUv).rgb
+          + 2.0 * (texture(tLow, vUv + vec2( o.x, 0.0)).rgb + texture(tLow, vUv + vec2(-o.x, 0.0)).rgb
+                 + texture(tLow, vUv + vec2(0.0,  o.y)).rgb + texture(tLow, vUv + vec2(0.0,-o.y)).rgb)
+          + texture(tLow, vUv + o).rgb + texture(tLow, vUv - o).rgb
+          + texture(tLow, vUv + vec2( o.x,-o.y)).rgb + texture(tLow, vUv + vec2(-o.x, o.y)).rgb;
+        fragColor = vec4(texture(tSame, vUv).rgb + c / 16.0, 1.0);
       }
     `;
 
-    /* ---- final grade: bloom composite, ACES, CA, vignette, gamma, dither ---- */
-    const GRADE = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D tScene;
-      uniform sampler2D tBloom;
+    /* ---- final grade ---- */
+    const GRADE = `
+      uniform highp sampler2D tScene;
+      uniform highp sampler2D tBloom;
       uniform float uTime;
       uniform float uBloom;
       uniform float uExposure;
@@ -484,157 +493,132 @@
         float r2 = dot(c, c);
         vec2 off = c * (r2 * 0.0035);
         vec3 col;
-        col.r = texture2D(tScene, vUv - off).r;
-        col.g = texture2D(tScene, vUv).g;
-        col.b = texture2D(tScene, vUv + off).b;
-        col += texture2D(tBloom, vUv).rgb * uBloom;
+        col.r = texture(tScene, vUv - off).r;
+        col.g = texture(tScene, vUv).g;
+        col.b = texture(tScene, vUv + off).b;
+        col += texture(tBloom, vUv).rgb * uBloom;
         col = aces(col * uExposure);
         col *= 1.0 - 0.24 * smoothstep(0.12, 0.58, r2);
         col = pow(col, vec3(0.4545));
         float lum = dot(col, vec3(0.299, 0.587, 0.114));
         col += (hashG(gl_FragCoord.xy + fract(uTime * 13.7) * 977.0) - 0.5) * 0.028 * (1.0 - lum * 0.8);
-        gl_FragColor = vec4(col, 1.0);
+        fragColor = vec4(col, 1.0);
       }
     `;
 
     /* ==================================================================== */
-    /*  2. RENDERER                                                          */
+    /*  2. STATE                                                             */
     /* ==================================================================== */
-    const stage = document.getElementById('stage');
-    let renderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-      if (!renderer.getContext()) throw new Error('no webgl context');
-    } catch (err) {
-      document.getElementById('fallback').hidden = false;
-      document.getElementById('loader').classList.add('done');
-      throw err;
-    }
-    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-    stage.appendChild(renderer.domElement);
-
-    const gl = renderer.getContext();
-    let rtType = THREE.UnsignedByteType;
-    if (renderer.capabilities.isWebGL2){
-      if (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float')){
-        rtType = THREE.HalfFloatType;
-      }
-    } else if (gl.getExtension('OES_texture_half_float') && gl.getExtension('EXT_color_buffer_half_float')){
-      rtType = THREE.HalfFloatType;
-    }
-
-    /* ==================================================================== */
-    /*  3. FULLSCREEN PASS RIG                                               */
-    /* ==================================================================== */
-    const fsScene = new THREE.Scene();
-    const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    const fsQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
-    fsQuad.frustumCulled = false;
-    fsScene.add(fsQuad);
-
-    function blit(material, target){
-      fsQuad.material = material;
-      renderer.setRenderTarget(target);
-      renderer.render(fsScene, fsCam);
-    }
-    function makePass(frag, uniforms){
-      return new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: frag, depthTest: false, depthWrite: false });
-    }
-
-    const baseTan = Math.tan(THREE.MathUtils.degToRad(CONFIG.fov) / 2);
-    const uniforms = {
-      uRes:        { value: new THREE.Vector2(2, 2) },
-      uTime:       { value: 0 },
-      uCamPos:     { value: new THREE.Vector3() },
-      uCamFwd:     { value: new THREE.Vector3(0, 0, -1) },
-      uCamRight:   { value: new THREE.Vector3(1, 0, 0) },
-      uCamUp:      { value: new THREE.Vector3(0, 1, 0) },
-      uTanHalfFov: { value: baseTan },
-      uEscape:     { value: 30 },
-      uTilt:       { value: CONFIG.tilt },     // ← 30° tilt uniform
-      uJitter:     { value: new THREE.Vector2(0, 0) },
-      uStepMul:    { value: 1 },
-    };
-
-    const matRay    = makePass(RAYMARCH, uniforms);
-    const matAccum  = makePass(ACCUM,  { tCurrent: { value: null }, tHistory: { value: null }, uBlend: { value: 1 } });
-    const matBright = makePass(BRIGHT, { tDiffuse: { value: null }, uThresh: { value: CONFIG.bloom.threshold }, uKnee: { value: CONFIG.bloom.knee } });
-    const matDown   = makePass(DOWN,   { tDiffuse: { value: null }, uTexel: { value: new THREE.Vector2() } });
-    const matUp     = makePass(UP,     { tLow: { value: null }, tSame: { value: null }, uTexel: { value: new THREE.Vector2() } });
-    const matGrade  = makePass(GRADE,  { tScene: { value: null }, tBloom: { value: null }, uTime: { value: 0 },
-                                         uBloom: { value: CONFIG.bloom.strength }, uExposure: { value: CONFIG.exposure } });
-
-    if (rtType !== THREE.HalfFloatType){   // LDR fallback: keep the pipeline alive on old GPUs
-      matBright.uniforms.uThresh.value = 0.55;
-      matBright.uniforms.uKnee.value = 0.30;
-      matGrade.uniforms.uExposure.value = 1.5;
-    }
-
-    /* ==================================================================== */
-    /*  4. RENDER TARGETS / SIZING / ADAPTIVE QUALITY                        */
-    /* ==================================================================== */
-    const perf = { scale: 1, stepMul: 1, ema: 16.7, frames: 0, lastApply: 0 };
+    const perf = { scale: 1, stepMul: 1, detail: 1, dprCap: 1, ema: 16.7, frames: 0, lastApply: 0 };
     const taa  = { frame: 0, alpha: 1, reset: 2,
                    lastTheta: CONFIG.theta0, lastPhi: CONFIG.phi0, lastR: CONFIG.radius0 };
+    const baseTan = Math.tan(CONFIG.fov * Math.PI / 360);
+    const cam = { pos:[0,0,0], fwd:[0,0,-1], right:[1,0,0], up:[0,1,0], tanHF: baseTan, escape: 30 };
 
-    let rtScene = null, rtAccum = [], rtDown = [], rtUp = [];
-    let levelW = [], levelH = [];
-    let bufW = 0, bufH = 0;
+    let gl = null, hdr = false, glReady = false, canvas = null;
+    let progRay, progAccum, progBright, progDown, progUp, progGrade;
+    let rtScene = null, rtAccum = [null, null], rtDown = [null, null, null], rtUp = [null, null];
+    let prev = 0, simT = 0, framesDrawn = 0, jx = 0, jy = 0;
 
-    function makeRT(w, h){
-      return new THREE.WebGLRenderTarget(Math.max(2, Math.floor(w)), Math.max(2, Math.floor(h)), {
-        type: rtType, format: THREE.RGBAFormat,
-        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
-        depthBuffer: false, stencilBuffer: false,
-      });
-    }
-
-    function rebuildRTs(w, h){
-      for (const rt of [rtScene, ...rtAccum, ...rtDown, ...rtUp]) if (rt) rt.dispose();
-      rtScene = makeRT(w, h);
-      rtAccum = [makeRT(w, h), makeRT(w, h)];
-      rtDown = []; rtUp = []; levelW = []; levelH = [];
-      let lw = w / 2, lh = h / 2;
-      for (let i = 0; i < 4; i++){
-        rtDown.push(makeRT(lw, lh));
-        levelW.push(Math.max(2, Math.floor(lw)));
-        levelH.push(Math.max(2, Math.floor(lh)));
-        lw /= 2; lh /= 2;
+    /* ==================================================================== */
+    /*  3. GL HELPERS                                                        */
+    /* ==================================================================== */
+    function makeProgram(fragBody){
+      const vs = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs, VS); gl.compileShader(vs);
+      if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) throw new Error('vs: ' + gl.getShaderInfoLog(vs));
+      const fs = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs, FS_HEAD + fragBody); gl.compileShader(fs);
+      if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) throw new Error('fs: ' + gl.getShaderInfoLog(fs));
+      const p = gl.createProgram();
+      gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
+      gl.deleteShader(vs); gl.deleteShader(fs);
+      const u = {};
+      const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+      for (let i = 0; i < n; i++){
+        const info = gl.getActiveUniform(p, i);
+        u[info.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(p, info.name);
       }
-      lw = w / 2; lh = h / 2;
-      for (let i = 0; i < 3; i++){ rtUp.push(makeRT(lw, lh)); lw /= 2; lh /= 2; }
-      taa.reset = 2;  // history is invalid → snap accumulation
+      return { p, u };
     }
 
-    const drawSize = new THREE.Vector2();
+    function makeTarget(w, h){
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      if (hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      else     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8,   w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return { tex, fb, w, h };
+    }
+    function freeTarget(t){
+      if (!t) return;
+      gl.deleteTexture(t.tex);
+      gl.deleteFramebuffer(t.fb);
+    }
+
+    function bindTex(unit, tex){
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+    }
+    function drawTo(t){
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null);
+      gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    /* ==================================================================== */
+    /*  4. SIZING / ADAPTIVE QUALITY                                         */
+    /* ==================================================================== */
+    function rebuildTargets(W, H){
+      freeTarget(rtScene);
+      freeTarget(rtAccum[0]); freeTarget(rtAccum[1]);
+      rtDown.forEach(freeTarget); rtUp.forEach(freeTarget);
+      rtScene = makeTarget(W, H);
+      rtAccum = [makeTarget(W, H), makeTarget(W, H)];
+      const hw = Math.max(2, W >> 1), hh = Math.max(2, H >> 1);
+      const qw = Math.max(2, W >> 2), qh = Math.max(2, H >> 2);
+      const ew = Math.max(2, W >> 3), eh = Math.max(2, H >> 3);
+      rtDown = [makeTarget(hw, hh), makeTarget(qw, qh), makeTarget(ew, eh)];
+      rtUp   = [makeTarget(hw, hh), makeTarget(qw, qh)];
+      taa.reset = 2;
+    }
+
     function applySize(){
-      const w = Math.max(stage.clientWidth, 1);
-      const h = Math.max(stage.clientHeight, 1);
-      const pr = Math.min(window.devicePixelRatio || 1, CONFIG.pixelCap) * perf.scale;
-      renderer.setPixelRatio(pr);
-      renderer.setSize(w, h, false);
-      renderer.getDrawingBufferSize(drawSize);
-      const W = Math.floor(drawSize.x), H = Math.floor(drawSize.y);
-      if (W !== bufW || H !== bufH){ bufW = W; bufH = H; rebuildRTs(W, H); }
-      uniforms.uRes.value.set(W, H);
+      if (!glReady) return;
+      const cw = Math.max(stage.clientWidth, 1);
+      const ch = Math.max(stage.clientHeight, 1);
+      const dpr = Math.min(window.devicePixelRatio || 1, perf.dprCap) * perf.scale;
+      const W = Math.max(2, Math.round(cw * dpr));
+      const H = Math.max(2, Math.round(ch * dpr));
+      if (canvas.width !== W || canvas.height !== H){
+        canvas.width = W; canvas.height = H;
+        rebuildTargets(W, H);
+      }
       const aspect = W / H;
-      uniforms.uTanHalfFov.value = aspect < 1 ? Math.min(baseTan / aspect, 1.1) : baseTan;
+      cam.tanHF = aspect < 1 ? Math.min(baseTan / aspect, 1.1) : baseTan;
     }
     new ResizeObserver(applySize).observe(stage);
     window.addEventListener('resize', applySize);
-    applySize();
 
     function govern(now, dt){
       perf.frames++;
       if (dt < 0.05) perf.ema += (dt * 1000 - perf.ema) * 0.06;
       if (perf.frames % 40 !== 0) return;
-      if (perf.ema > 22 && now - perf.lastApply > 1400){
-        if (perf.scale > 0.5){ perf.scale = Math.max(0.5, perf.scale * 0.85); applySize(); }
-        else if (perf.stepMul < 1.35){ perf.stepMul = Math.min(1.35, perf.stepMul * 1.08); }
+      if (perf.ema > 21 && now - perf.lastApply > 1400){
+        if (perf.scale > 0.35){ perf.scale = Math.max(0.35, perf.scale * 0.85); applySize(); }
+        else if (perf.stepMul < 1.5){ perf.stepMul = Math.min(1.5, perf.stepMul * 1.12); }
         perf.lastApply = now;
-      } else if (perf.ema < 13.5 && now - perf.lastApply > 2500){
-        if (perf.stepMul > 1.001){ perf.stepMul = Math.max(1, perf.stepMul * 0.93); }
-        else if (perf.scale < 1){ perf.scale = Math.min(1, perf.scale * 1.12); applySize(); }
+      } else if (perf.ema < 13 && now - perf.lastApply > 2600){
+        if (perf.scale < 1){ perf.scale = Math.min(1, perf.scale * 1.12); applySize(); }
+        else if (perf.stepMul > 1.001){ perf.stepMul = Math.max(1, perf.stepMul * 0.92); }
         perf.lastApply = now;
       }
     }
@@ -642,20 +626,12 @@
     /* ==================================================================== */
     /*  5. CAMERA RIG                                                        */
     /* ==================================================================== */
-    const UP = new THREE.Vector3(0, 1, 0);
-    const _pos = new THREE.Vector3(), _fwd = new THREE.Vector3(),
-          _right = new THREE.Vector3(), _up = new THREE.Vector3();
-
     const rig = {
-      theta: CONFIG.theta0,
-      phi: CONFIG.phi0,
-      radius: CONFIG.radius0,
-      targetRadius: CONFIG.radiusHome,
+      theta: CONFIG.theta0, phi: CONFIG.phi0,
+      radius: CONFIG.radius0, targetRadius: CONFIG.radiusHome,
       vTheta: 0, vPhi: 0,
-      dragging: false,
-      homePhi: false,
-      idle: CONFIG.autoDelay - 1.6,
-      autoW: 0,
+      dragging: false, homePhi: false,
+      idle: CONFIG.autoDelay - 1.6, autoW: 0,
       lastX: 0, lastY: 0, lastT: 0,
     };
 
@@ -688,17 +664,21 @@
 
     function updateCamera(){
       const cp = Math.cos(rig.phi), sp = Math.sin(rig.phi);
-      _pos.set(rig.radius * cp * Math.sin(rig.theta),
-               rig.radius * sp,
-               rig.radius * cp * Math.cos(rig.theta));
-      _fwd.copy(_pos).multiplyScalar(-1).normalize();
-      _right.crossVectors(_fwd, UP).normalize();
-      _up.crossVectors(_right, _fwd);
-      uniforms.uCamPos.value.copy(_pos);
-      uniforms.uCamFwd.value.copy(_fwd);
-      uniforms.uCamRight.value.copy(_right);
-      uniforms.uCamUp.value.copy(_up);
-      uniforms.uEscape.value = Math.max(30, rig.radius + 4);
+      const px = rig.radius * cp * Math.sin(rig.theta);
+      const py = rig.radius * sp;
+      const pz = rig.radius * cp * Math.cos(rig.theta);
+      let fx = -px, fy = -py, fz = -pz;
+      const fl = Math.hypot(fx, fy, fz) || 1;
+      fx /= fl; fy /= fl; fz /= fl;
+      let rx = -fz, rz = fx;
+      const rl = Math.hypot(rx, rz) || 1;
+      rx /= rl; rz /= rl;
+      const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+      cam.pos = [px, py, pz];
+      cam.fwd = [fx, fy, fz];
+      cam.right = [rx, 0, rz];
+      cam.up = [ux, uy, uz];
+      cam.escape = Math.max(30, rig.radius + 4);
     }
 
     /* ==================================================================== */
@@ -708,7 +688,6 @@
     let pinchBase = 0;
 
     function hintDim(){ document.getElementById('hint').classList.add('dim'); }
-
     function resetView(){
       rig.targetRadius = CONFIG.radiusHome;
       rig.homePhi = true;
@@ -790,7 +769,7 @@
     });
 
     /* ==================================================================== */
-    /*  7. TAA HELPERS                                                       */
+    /*  7. TAA / PIPELINE                                                    */
     /* ==================================================================== */
     function halton(i, b){
       let f = 1, r = 0;
@@ -798,46 +777,118 @@
       return r;
     }
 
-    /* ==================================================================== */
-    /*  8. PIPELINE                                                          */
-    /* ==================================================================== */
+    function setRayUniforms(w, h){
+      const u = progRay.u;
+      gl.uniform2f(u.uRes, w, h);
+      gl.uniform1f(u.uTime, simT);
+      gl.uniform3f(u.uCamPos,  cam.pos[0],  cam.pos[1],  cam.pos[2]);
+      gl.uniform3f(u.uCamFwd,  cam.fwd[0],  cam.fwd[1],  cam.fwd[2]);
+      gl.uniform3f(u.uCamRight, cam.right[0], cam.right[1], cam.right[2]);
+      gl.uniform3f(u.uCamUp,   cam.up[0],   cam.up[1],   cam.up[2]);
+      gl.uniform1f(u.uTanHalfFov, cam.tanHF);
+      gl.uniform1f(u.uEscape, cam.escape);
+      gl.uniform1f(u.uTilt, CONFIG.tilt);
+      gl.uniform2f(u.uJitter, jx, jy);
+      gl.uniform1f(u.uStepMul, perf.stepMul);
+      gl.uniform1f(u.uDetail, perf.detail);
+    }
+
     function renderPipeline(){
-      /* 1. geodesic ray-march (with sub-pixel jitter) → HDR scene */
-      blit(matRay, rtScene);
+      /* 1 — geodesic ray-march (with sub-pixel jitter) → HDR scene */
+      gl.useProgram(progRay.p);
+      setRayUniforms(rtScene.w, rtScene.h);
+      drawTo(rtScene);
 
-      /* 2. temporal accumulation: history + current → EMA supersample */
-      matAccum.uniforms.tCurrent.value = rtScene.texture;
-      matAccum.uniforms.tHistory.value = rtAccum[0].texture;
-      matAccum.uniforms.uBlend.value = taa.alpha;
-      blit(matAccum, rtAccum[1]);
-      rtAccum.reverse();
-      const scene = rtAccum[0].texture;
+      /* 2 — temporal accumulation */
+      gl.useProgram(progAccum.p);
+      const ua = progAccum.u;
+      bindTex(0, rtScene.tex);    gl.uniform1i(ua.tCurrent, 0);
+      bindTex(1, rtAccum[0].tex); gl.uniform1i(ua.tHistory, 1);
+      gl.uniform1f(ua.uBlend, taa.alpha);
+      drawTo(rtAccum[1]);
+      rtAccum = [rtAccum[1], rtAccum[0]];
+      const sceneTex = rtAccum[0].tex;
 
-      /* 3. bloom pyramid: bright pass → down chain → tent up chain */
-      matBright.uniforms.tDiffuse.value = scene;
-      blit(matBright, rtDown[0]);
-      for (let i = 1; i < 4; i++){
-        matDown.uniforms.tDiffuse.value = rtDown[i - 1].texture;
-        matDown.uniforms.uTexel.value.set(1 / levelW[i - 1], 1 / levelH[i - 1]);
-        blit(matDown, rtDown[i]);
+      /* 3 — bloom pyramid */
+      gl.useProgram(progBright.p);
+      const ub = progBright.u;
+      bindTex(0, sceneTex);
+      gl.uniform1i(ub.tDiffuse, 0);
+      gl.uniform1f(ub.uThresh, hdr ? CONFIG.bloom.threshold : 0.55);
+      gl.uniform1f(ub.uKnee,   hdr ? CONFIG.bloom.knee      : 0.30);
+      drawTo(rtDown[0]);
+
+      gl.useProgram(progDown.p);
+      const ud = progDown.u;
+      for (let i = 1; i < 3; i++){
+        bindTex(0, rtDown[i - 1].tex);
+        gl.uniform1i(ud.tDiffuse, 0);
+        gl.uniform2f(ud.uTexel, 1 / rtDown[i - 1].w, 1 / rtDown[i - 1].h);
+        drawTo(rtDown[i]);
       }
-      matUp.uniforms.tLow.value = rtDown[3].texture;
-      matUp.uniforms.tSame.value = rtDown[2].texture;
-      matUp.uniforms.uTexel.value.set(1 / levelW[3], 1 / levelH[3]);
-      blit(matUp, rtUp[2]);
-      matUp.uniforms.tLow.value = rtUp[2].texture;
-      matUp.uniforms.tSame.value = rtDown[1].texture;
-      matUp.uniforms.uTexel.value.set(1 / levelW[2], 1 / levelH[2]);
-      blit(matUp, rtUp[1]);
-      matUp.uniforms.tLow.value = rtUp[1].texture;
-      matUp.uniforms.tSame.value = rtDown[0].texture;
-      matUp.uniforms.uTexel.value.set(1 / levelW[1], 1 / levelH[1]);
-      blit(matUp, rtUp[0]);
 
-      /* 4. grade to screen */
-      matGrade.uniforms.tScene.value = scene;
-      matGrade.uniforms.tBloom.value = rtUp[0].texture;
-      blit(matGrade, null);
+      gl.useProgram(progUp.p);
+      const uu = progUp.u;
+      bindTex(0, rtDown[2].tex); gl.uniform1i(uu.tLow, 0);
+      bindTex(1, rtDown[1].tex); gl.uniform1i(uu.tSame, 1);
+      gl.uniform2f(uu.uTexel, 1 / rtDown[2].w, 1 / rtDown[2].h);
+      drawTo(rtUp[1]);
+      bindTex(0, rtUp[1].tex);   gl.uniform1i(uu.tLow, 0);
+      bindTex(1, rtDown[0].tex); gl.uniform1i(uu.tSame, 1);
+      gl.uniform2f(uu.uTexel, 1 / rtUp[1].w, 1 / rtUp[1].h);
+      drawTo(rtUp[0]);
+
+      /* 4 — grade to screen */
+      gl.useProgram(progGrade.p);
+      const ug = progGrade.u;
+      bindTex(0, sceneTex);      gl.uniform1i(ug.tScene, 0);
+      bindTex(1, rtUp[0].tex);   gl.uniform1i(ug.tBloom, 1);
+      gl.uniform1f(ug.uTime, simT);
+      gl.uniform1f(ug.uBloom, CONFIG.bloom.strength);
+      gl.uniform1f(ug.uExposure, hdr ? CONFIG.exposure : 1.5);
+      drawTo(null);
+    }
+
+    /* ==================================================================== */
+    /*  8. STARTUP BENCHMARK                                                 */
+    /* ==================================================================== */
+    function benchmark(){
+      const bw = 192, bh = 108;
+      const bt = makeTarget(bw, bh);
+      rig.theta = CONFIG.theta0; rig.phi = CONFIG.phi0; rig.radius = CONFIG.radiusHome;
+      simT = 3.0;
+      updateCamera();
+      cam.tanHF = baseTan;
+      gl.useProgram(progRay.p);
+      const draw = () => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bt.fb);
+        gl.viewport(0, 0, bw, bh);
+        setRayUniforms(bw, bh);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      draw(); draw();
+      gl.finish();
+      const t0 = performance.now();
+      draw(); draw(); draw();
+      gl.finish();
+      const ms = Math.max((performance.now() - t0) / 3, 0.05);
+      freeTarget(bt);
+      simT = 0;
+
+      const cw = Math.max(stage.clientWidth, 1);
+      const ch = Math.max(stage.clientHeight, 1);
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+      const fullPix = cw * dpr * ch * dpr;
+      let fullMs = ms * fullPix / (bw * bh);
+
+      let detail = 1, stepMul = 1;
+      if (fullMs > 34){ detail = 0;     fullMs *= 0.70; }
+      if (fullMs > 30){ stepMul = 1.25; fullMs *= 0.80; }
+      if (fullMs > 42){ stepMul = 1.5;  fullMs *= 0.75; }
+      perf.detail  = detail;
+      perf.stepMul = stepMul;
+      perf.dprCap  = fullMs < 3.5 ? 1.25 : 1.0;
+      perf.scale   = clamp(Math.sqrt(CONFIG.frameBudget / Math.max(fullMs, 0.4)), 0.35, 1);
     }
 
     /* ==================================================================== */
@@ -849,7 +900,7 @@
           hudAA = $('hudAA');
 
     const pad = n => String(n).padStart(2, '0');
-    let hudAcc = 0, fpsEma = 60, simT = 0, framesDrawn = 0;
+    let hudAcc = 0, fpsEma = 60;
 
     function updateHUD(dt){
       hudAcc += dt;
@@ -864,62 +915,113 @@
       hudIncl.textContent = `${inc >= 0 ? '+' : ''}${inc.toFixed(1)}\u00B0`;
       const az = ((rig.theta * 180 / Math.PI) % 360 + 360) % 360;
       hudAz.textContent   = `${az.toFixed(1)}\u00B0`;
-      hudRes.textContent  = `${bufW}\u00D7${bufH} \u00B7 ${Math.round(perf.scale * 100)}%`;
-      hudAA.textContent   = `\u00D7${clamp(Math.round(1 / Math.max(taa.alpha, 1 / 64)), 1, 64)}`;
+      hudRes.textContent  = `${canvas.width}\u00D7${canvas.height} \u00B7 ${Math.round(perf.scale * 100)}%`;
+      hudAA.textContent   = `\u00D7${clamp(Math.round(1 / Math.max(taa.alpha, 0.02)), 1, 50)}`;
     }
 
-    let loaderDone = false;
+    let loaderHidden = false;
     function hideLoader(){
-      if (loaderDone) return;
-      loaderDone = true;
-      setTimeout(() => {
-        const l = $('loader');
-        l.classList.add('done');
-        setTimeout(() => l.remove(), 1200);
-      }, 700);
+      if (loaderHidden) return;
+      loaderHidden = true;
+      const l = $('loader');
+      l.classList.add('done');
+      setTimeout(() => l.remove(), 1000);
+    }
+    function fail(){
+      $('fallback').hidden = false;
+      $('loader').classList.add('done');
     }
 
     /* ==================================================================== */
     /*  10. MAIN LOOP                                                        */
     /* ==================================================================== */
-    let prev = performance.now();
-
     function frame(now){
       requestAnimationFrame(frame);
       let dt = (now - prev) / 1000;
       prev = now;
       if (dt > 0.1) dt = 0.1;
+      if (dt < 0) dt = 0;
       simT += dt;
 
       updateRig(dt);
       updateCamera();
 
-      /* TAA: camera motion → blend factor; Halton sub-pixel jitter */
       const dth = rig.theta - taa.lastTheta;
       const dph = rig.phi - taa.lastPhi;
       const drr = (rig.radius - taa.lastR) / Math.max(rig.radius, 1);
       taa.lastTheta = rig.theta; taa.lastPhi = rig.phi; taa.lastR = rig.radius;
-      const motion = Math.min(1, (Math.abs(dth) + Math.abs(dph)) * 26 + Math.abs(drr) * 70);
+      const motion = Math.min(1, Math.abs(dth) / 0.003 + Math.abs(dph) / 0.003 + Math.abs(drr) / 0.005);
       let target = CONFIG.aaStill + (CONFIG.aaMove - CONFIG.aaStill) * motion;
       if (taa.reset > 0){ target = 1; taa.reset--; }
       taa.alpha += (target - taa.alpha) * Math.min(1, dt * 9);
       const ji = (taa.frame++ % 8) + 1;
-      uniforms.uJitter.value.set(halton(ji, 2) - 0.5, halton(ji, 3) - 0.5);
-
-      // Black hole tilt is fixed at 30° — animate uniforms.uTilt.value here if desired.
-      uniforms.uTime.value = simT;
-      uniforms.uStepMul.value = perf.stepMul;
-      matGrade.uniforms.uTime.value = simT;
+      jx = halton(ji, 2) - 0.5;
+      jy = halton(ji, 3) - 0.5;
 
       renderPipeline();
 
       framesDrawn++;
-      if (framesDrawn === 2) hideLoader();
-
+      if (framesDrawn === 3) hideLoader();
       govern(now, dt);
       updateHUD(dt);
     }
-    requestAnimationFrame(frame);
+
+    /* ==================================================================== */
+    /*  11. INIT                                                             */
+    /* ==================================================================== */
+    async function init(){
+      const tick = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+
+      lTxt.textContent = 'INITIALIZING CONTEXT';
+      await tick();
+
+      canvas = document.createElement('canvas');
+      gl = canvas.getContext('webgl2', {
+        antialias: false, alpha: false, depth: false, stencil: false,
+        powerPreference: 'high-performance',
+      });
+      if (!gl) throw new Error('WebGL2 unavailable');
+      stage.appendChild(canvas);
+      gl.bindVertexArray(gl.createVertexArray());
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      hdr = !!gl.getExtension('EXT_color_buffer_float');
+      canvas.addEventListener('webglcontextlost', e => {
+        e.preventDefault();
+        lTxt.textContent = 'GPU CONTEXT LOST — RELOAD PAGE';
+      });
+
+      lTxt.textContent = 'COMPILING GEODESIC KERNEL';
+      await tick();
+      progRay    = makeProgram(RAYMARCH);
+      progAccum  = makeProgram(ACCUM);
+      progBright = makeProgram(BRIGHT);
+      progDown   = makeProgram(DOWN);
+      progUp     = makeProgram(UP);
+      progGrade  = makeProgram(GRADE);
+
+      lTxt.textContent = 'CALIBRATING GPU';
+      await tick();
+      benchmark();
+
+      rig.radius = CONFIG.radius0;
+      glReady = true;
+      applySize();
+
+      updateCamera();
+      renderPipeline();
+      framesDrawn = 1;
+
+      lTxt.textContent = 'READY';
+      prev = performance.now();
+      requestAnimationFrame(frame);
+      setTimeout(hideLoader, 3200);
+    }
+
+    init().catch(err => {
+      console.error(err);
+      fail();
+    });
   </script>
 </body>
 </html>
